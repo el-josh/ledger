@@ -545,6 +545,21 @@
     reader.onload = function (ev) {
       try {
         var wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
+
+        // First try the sectioned "monthly ledger" layout (Income / Expenditure
+        // / Savings blocks, one sheet per month). Fall back to a flat table.
+        var ledger = parseLedgerWorkbook(wb, file.name);
+        if (ledger.entries.length) {
+          state.importData = {
+            mode: 'ledger', fileName: file.name, year: ledger.year,
+            entries: ledger.entries, counts: ledger.counts, perMonth: ledger.perMonth,
+            sheetsUsed: ledger.sheetsUsed, skippedSheets: ledger.skippedSheets,
+            error: null, msg: null
+          };
+          render();
+          return;
+        }
+
         var sheetName = wb.SheetNames[0];
         var rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '', blankrows: false });
         // find first non-empty row as header
@@ -553,14 +568,14 @@
         var headers = (rows[hi] || []).map(function (c, i) { return String(c || '').trim() || ('Column ' + (i + 1)); });
         var body = rows.slice(hi + 1).filter(function (r) { return r.some(function (c) { return c !== '' && c != null; }); });
         state.importData = {
-          sheetName: sheetName, headers: headers, rows: body,
+          mode: 'table', sheetName: sheetName, headers: headers, rows: body,
           mapping: autoMap(headers),
           defaultType: 'expenses', defaultCurrency: state.displayCurrency,
           error: null, msg: null
         };
         render();
       } catch (e) {
-        state.importData = { error: 'Could not read that file: ' + e.message, headers: [], rows: [], mapping: {} };
+        state.importData = { mode: 'table', error: 'Could not read that file: ' + e.message, headers: [], rows: [], mapping: {} };
         render();
       }
     };
@@ -589,8 +604,140 @@
     return map;
   }
 
+  // ---- sectioned "monthly ledger" workbook parser ------------------------
+  // Handles workbooks laid out like the Google Sheets original: each tab is a
+  // month, with an Income block, an Expenditure block and a Savings/Invest
+  // block side by side, each a (name, amount) column pair, and "(NGN)"/"(USD)"
+  // sub-headers switching the currency partway down a block.
+  var SECKEYS = { income: 'income', expense: 'expenses', savings: 'savings' };
+
+  function monthFromName(name) {
+    var s = String(name || '').trim().toLowerCase();
+    for (var i = 0; i < MONTHS.length; i++) { if (s.indexOf(MONTHS[i].slice(0, 3).toLowerCase()) === 0) return i + 1; }
+    var n = parseInt(s, 10); if (n >= 1 && n <= 12) return n;
+    return null;
+  }
+  function currencyMarker(v) {
+    var s = String(v == null ? '' : v).trim();
+    var m = s.match(/^\(?\s*(NGN|USD|EUR|naira|dollars?|euros?|₦|\$|€)\s*\)?$/i);
+    if (!m) return null;
+    return normCur(m[1]);
+  }
+  function currencyInText(v) { var m = String(v == null ? '' : v).match(/\((NGN|USD|EUR|naira|dollars?|euros?)\)/i); return m ? normCur(m[1]) : null; }
+  function symbolCurrency(v) { var s = String(v == null ? '' : v); if (s.indexOf('₦') >= 0) return 'NGN'; if (s.indexOf('$') >= 0) return 'USD'; if (s.indexOf('€') >= 0) return 'EUR'; return null; }
+  function normCur(t) {
+    t = String(t).toUpperCase();
+    if (t === 'NGN' || t === 'NAIRA' || t === '₦') return 'NGN';
+    if (t === 'USD' || t === 'DOLLAR' || t === 'DOLLARS' || t === '$') return 'USD';
+    if (t === 'EUR' || t === 'EURO' || t === 'EUROS' || t === '€') return 'EUR';
+    return null;
+  }
+
+  function detectLedgerAnchors(aoa) {
+    var found = {};
+    for (var r = 0; r < aoa.length; r++) {
+      var row = aoa[r] || [];
+      for (var c = 0; c < row.length; c++) {
+        var v = String(row[c] == null ? '' : row[c]).trim().toLowerCase();
+        if (!v) continue;
+        if (!found.income && /^income\b/.test(v)) found.income = { r: r, c: c };
+        else if (!found.expense && /^(expenditure|expenses|expense)\b/.test(v)) found.expense = { r: r, c: c };
+        else if (!found.savings && /(saving|invest)/.test(v)) found.savings = { r: r, c: c };
+      }
+    }
+    return found;
+  }
+
+  function parseLedgerWorkbook(wb, fileName) {
+    var entries = [], counts = { income: 0, expenses: 0, savings: 0 }, perMonth = {};
+    var sheetsUsed = [], skippedSheets = [];
+    var ym = String(fileName || '').match(/(19|20)\d{2}/);
+    var year = ym ? parseInt(ym[0], 10) : state.year;
+
+    wb.SheetNames.forEach(function (sn) {
+      var aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', blankrows: true });
+      var anchors = detectLedgerAnchors(aoa);
+      var mo = monthFromName(sn);
+      if (!(anchors.income && anchors.expense) || !mo) { skippedSheets.push(sn); return; }
+      sheetsUsed.push(sn);
+      perMonth[mo] = perMonth[mo] || { income: 0, expenses: 0, savings: 0 };
+
+      ['income', 'expense', 'savings'].forEach(function (secKey) {
+        var anchor = anchors[secKey]; if (!anchor) return;
+        var section = SECKEYS[secKey];
+        var nameCol = anchor.c, amtCol = anchor.c + 1;
+        var cur = currencyInText(aoa[anchor.r] && aoa[anchor.r][anchor.c]) || 'NGN';
+        for (var r = anchor.r + 1; r < aoa.length; r++) {
+          var row = aoa[r] || [];
+          var nameRaw = row[nameCol], amtRaw = row[amtCol];
+          var mk = currencyMarker(nameRaw) || currencyMarker(amtRaw);
+          if (mk) { cur = mk; continue; }
+          var amt = parseAmount(amtRaw);
+          if (isNaN(amt) || amt === 0) continue;
+          var nameStr = cellStr(nameRaw).trim();
+          // Income/expense: a number with no name is a subtotal — skip it.
+          if (section !== 'savings' && !nameStr) continue;
+          var currency = symbolCurrency(amtRaw) || symbolCurrency(nameRaw) || cur;
+          var nm = nameStr || (section === 'savings' ? 'Investment' : SECTIONS[section]);
+          entries.push({ m: mo, section: section, name: nm, amount: Math.abs(amt), currency: currency, category: autoCategory(nm, section) });
+          counts[section]++; perMonth[mo][section]++;
+        }
+      });
+    });
+    return { entries: entries, year: year, counts: counts, perMonth: perMonth, sheetsUsed: sheetsUsed, skippedSheets: skippedSheets };
+  }
+
+  function renderLedgerImportHtml() {
+    var d = state.importData;
+    var monthsList = Object.keys(d.perMonth).map(Number).sort(function (a, b) { return a - b; });
+    var rowsHtml = monthsList.map(function (mo) {
+      var p = d.perMonth[mo];
+      return '<tr><td style="text-align:left">' + MONTHS[mo - 1] + '</td><td>' + p.income + '</td><td>' + p.expenses + '</td><td>' + p.savings + '</td></tr>';
+    }).join('');
+    var skipped = (d.skippedSheets || []).length
+      ? '<div class="rate-status">Skipped sheet' + (d.skippedSheets.length === 1 ? '' : 's') + ': ' + esc(d.skippedSheets.join(', ')) + '</div>' : '';
+
+    return '<div class="overlay" data-act="closeImport"><div class="modal wide" data-stop="1">' +
+      '<div class="title">Import monthly ledger</div>' +
+      '<div class="desc">Detected a sectioned monthly workbook (Income / Expenditure / Savings blocks). Found <strong>' +
+        d.sheetsUsed.length + ' month tab' + (d.sheetsUsed.length === 1 ? '' : 's') + '</strong> with <strong>' +
+        d.counts.income + '</strong> income, <strong>' + d.counts.expenses + '</strong> expense and <strong>' +
+        d.counts.savings + '</strong> savings entries. Savings figures import as allocations.</div>' +
+      '<label class="field"><span class="lbl">Import into year</span>' +
+        '<input id="ledger-year" type="number" inputmode="numeric" value="' + attr(d.year) + '"></label>' +
+      '<div class="preview"><div class="preview-scroll"><table><thead><tr>' +
+        '<th style="text-align:left">Month</th><th style="text-align:left">Income</th><th style="text-align:left">Expenses</th><th style="text-align:left">Savings</th></tr></thead><tbody>' +
+        rowsHtml + '</tbody></table></div></div>' +
+      skipped +
+      '<div class="modal-actions">' +
+        '<button class="btn link" data-act="pickFile">Choose another file</button>' +
+        '<div class="spacer"></div>' +
+        '<button class="btn ghost" data-act="closeImport">Cancel</button>' +
+        '<button class="btn primary" data-act="runLedgerImport">Import ' + d.entries.length + ' entries</button>' +
+      '</div></div></div>';
+  }
+
+  function runLedgerImport() {
+    var d = state.importData;
+    var yEl = document.getElementById('ledger-year');
+    var year = parseInt(yEl && yEl.value, 10);
+    if (!(year >= 1900 && year <= 3000)) year = d.year;
+    var data = clone(state.data);
+    d.entries.forEach(function (e) {
+      var b = ensure(data, year, e.m);
+      b[e.section].push({ id: genId(), name: e.name, amount: e.amount, currency: e.currency, category: e.category, recurring: false });
+    });
+    state.data = data;
+    state.year = year;
+    state.importData = null;
+    persist();
+    toast('Imported ' + d.entries.length + ' entries across ' + d.sheetsUsed.length + ' month' + (d.sheetsUsed.length === 1 ? '' : 's'));
+    render();
+  }
+
   function renderImportHtml() {
     var d = state.importData;
+    if (d.mode === 'ledger') return renderLedgerImportHtml();
     if (d.error) {
       return '<div class="overlay" data-act="closeImport"><div class="modal" data-stop="1">' +
         '<div class="title">Import spreadsheet</div><div class="err">' + esc(d.error) + '</div>' +
@@ -854,6 +1001,7 @@
       case 'openImport': openImport(); break;
       case 'pickFile': openImport(); break;
       case 'runImport': runImport(); break;
+      case 'runLedgerImport': runLedgerImport(); break;
       case 'closeImport': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.importData = null; render(); } break;
     }
   });
