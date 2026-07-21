@@ -15,7 +15,7 @@
   var CURS = ['NGN', 'USD', 'EUR'];
   var MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   var SECTIONS = { income: 'income', expenses: 'expense', savings: 'saving' };
-  var KEY = 'pft-ledger-v2';
+  var KEY = 'pft-ledger-v3';
 
   var CATEGORIES = ['Salary','Groceries','Housing','Utilities','Transport','Health','Family','Education','Entertainment','Shopping','Savings','Other'];
   // Keyword hints, evaluated in order — first match wins.
@@ -36,52 +36,17 @@
   // ---- state --------------------------------------------------------------
   var state = load() || seed();
 
+  // Fresh, empty ledger. Nothing shows until the user adds entries or imports.
   function seed() {
-    var c = 0;
-    var mk = function (name, amount, currency, category, recurring) {
-      return { id: 's' + (c++), name: name, amount: amount, currency: currency,
-               category: category || autoCategory(name, 'expenses'), recurring: !!recurring };
-    };
-    var data = { 2026: {
-      1: {
-        income: [mk('NW Salary',350000,'NGN','Salary',true), mk('PerchFit Balance',125,'USD','Salary'), mk('SAC Caldera 50%',1750,'USD','Salary')],
-        expenses: [mk('Groceries',80000,'NGN','Groceries',true), mk('Laundry',9700,'NGN','Shopping',true), mk('Car Fuel',40000,'NGN','Transport',true), mk('Car Alarm',40000,'NGN','Transport'), mk('Gen Fuel',35000,'NGN','Utilities',true), mk('Gen Repair',4000,'NGN','Utilities'), mk('Dad Car Fix',150000,'NGN','Family'), mk('Diffusers',16000,'NGN','Shopping'), mk('Light Bill',25000,'NGN','Utilities',true), mk('Wall Fixing',55000,'NGN','Housing'), mk('Dad Hospital',80000,'NGN','Health'), mk('Eunice School Fees',100000,'NGN','Education',true), mk('Mum Groceries',50000,'NGN','Family',true), mk('Peter Security',30000,'NGN','Family',true), mk('Caleb Gift',20000,'NGN','Family'), mk('Josh IKJ Gift',5000,'NGN','Family'), mk('Facility Fee Part',100000,'NGN','Housing')],
-        savings: [mk('Investment',1000000,'NGN','Savings')]
-      },
-      2: {
-        income: [mk('NW Salary',350000,'NGN','Salary',true), mk('SAC Caldera 50%',500,'USD','Salary')],
-        expenses: [mk('Rent',600000,'NGN','Housing'), mk('Groceries',85000,'NGN','Groceries',true), mk('Car Fuel',45000,'NGN','Transport',true), mk('Gen Fuel',38000,'NGN','Utilities',true), mk('Light Bill',27000,'NGN','Utilities',true), mk('Internet',25000,'NGN','Utilities'), mk('Mum Groceries',50000,'NGN','Family',true), mk('Eunice School Fees',100000,'NGN','Education',true), mk('Miscellaneous',91613,'NGN','Other')],
-        savings: []
-      },
-      3: {
-        income: [mk('NW Salary',350000,'NGN','Salary',true), mk('SAC Caldera 50%',2750,'USD','Salary')],
-        expenses: [mk('Groceries',90000,'NGN','Groceries',true), mk('Car Fuel',42000,'NGN','Transport',true), mk('Gen Fuel',36000,'NGN','Utilities',true), mk('Light Bill',28000,'NGN','Utilities',true), mk('Dad Hospital',120000,'NGN','Health'), mk('Eunice School Fees',100000,'NGN','Education',true), mk('Mum Groceries',50000,'NGN','Family',true), mk('Car Service',80000,'NGN','Transport'), mk('Facility Fee',100000,'NGN','Housing'), mk('Diffusers',15000,'NGN','Shopping'), mk('Miscellaneous',305395,'NGN','Other')],
-        savings: [mk('Investment',2100000,'NGN','Savings')]
-      }
-    }};
-    // seed recurring templates from the items flagged above in month 1/2
-    var recurring = [];
-    var seen = {};
-    [1,2,3].forEach(function (mo) {
-      var b = data[2026][mo];
-      ['income','expenses','savings'].forEach(function (sec) {
-        b[sec].forEach(function (e) {
-          if (e.recurring) {
-            var k = sec + '|' + e.name.toLowerCase();
-            if (!seen[k]) { seen[k] = 1; recurring.push({ id: genId(), section: sec, name: e.name, amount: e.amount, currency: e.currency, category: e.category }); }
-          }
-        });
-      });
-    });
     return {
-      data: data,
+      data: {},
       rates: { NGN: 1, USD: 1600, EUR: 1750 },
       ratesMeta: { updated: null, source: 'manual' },
       wiseToken: '',
       displayCurrency: 'NGN',
-      year: 2026,
+      year: new Date().getFullYear(),
       hidden: false,
-      recurring: recurring,
+      recurring: [],
       // transient view state
       view: 'dashboard', activeMonth: null, modal: null,
       settingsOpen: false, ratesMsg: null, recurringOpen: false,
@@ -100,7 +65,7 @@
         ratesMeta: o.ratesMeta || { updated: null, source: 'manual' },
         wiseToken: o.wiseToken || '',
         displayCurrency: o.displayCurrency || 'NGN',
-        year: o.year || 2026,
+        year: o.year || new Date().getFullYear(),
         hidden: !!o.hidden,
         recurring: o.recurring || [],
         view: 'dashboard', activeMonth: null, modal: null,
@@ -133,6 +98,9 @@
   function addNative(o, list) { (list || []).forEach(function (e) { o[e.currency] = (o[e.currency] || 0) + e.amount; }); }
   function showNat(o, disp) { var ks = CURS.filter(function (c) { return o[c] > 0; }); return ks.length > 1 || (ks.length === 1 && ks[0] !== disp); }
   function natStr(o) { return CURS.filter(function (c) { return o[c] > 0; }).map(function (c) { return fmt(o[c], c); }).join('   +   '); }
+  // "The rest goes to savings": whatever income leaves after expenses is saved.
+  function savedOf(md, to) { return sumConv(md.income, to) - sumConv(md.expenses, to); }
+  function pct(n, d) { return Math.max(0, Math.min(100, Math.round((n / (d || 1)) * 100))) + '%'; }
 
   function autoCategory(name, section) {
     if (section === 'income') return 'Salary';
@@ -284,19 +252,20 @@
     var months = MONTHS.map(function (name, i) {
       var mo = i + 1;
       var md = yearData[mo] || { income: [], expenses: [], savings: [] };
-      var inc = sumConv(md.income, disp), exp = sumConv(md.expenses, disp), sav = sumConv(md.savings, disp);
+      var inc = sumConv(md.income, disp), exp = sumConv(md.expenses, disp);
       var has = ((md.income || []).length + (md.expenses || []).length + (md.savings || []).length) > 0;
-      return { mo: mo, name: name, has: has, inc: inc, exp: exp, sav: sav, net: inc - exp };
+      return { mo: mo, name: name, has: has, inc: inc, exp: exp, sav: inc - exp, net: inc - exp };
     });
 
-    var inc = 0, exp = 0, sav = 0;
-    var incN = { NGN: 0, USD: 0, EUR: 0 }, expN = { NGN: 0, USD: 0, EUR: 0 }, savN = { NGN: 0, USD: 0, EUR: 0 };
+    var inc = 0, exp = 0;
+    var incN = { NGN: 0, USD: 0, EUR: 0 }, expN = { NGN: 0, USD: 0, EUR: 0 };
     Object.keys(yearData).forEach(function (k) {
       var md = yearData[k];
-      inc += sumConv(md.income, disp); exp += sumConv(md.expenses, disp); sav += sumConv(md.savings, disp);
-      addNative(incN, md.income); addNative(expN, md.expenses); addNative(savN, md.savings);
+      inc += sumConv(md.income, disp); exp += sumConv(md.expenses, disp);
+      addNative(incN, md.income); addNative(expN, md.expenses);
     });
-    var maxT = Math.max(inc, exp, sav, 1);
+    var sav = inc - exp; // total saved = the leftover
+    var maxT = Math.max(inc, exp, Math.abs(sav), 1);
 
     var withData = months.filter(function (m) { return m.has; });
     var maxAbs = Math.max.apply(null, [1].concat(withData.map(function (m) { return Math.abs(m.net); })));
@@ -332,27 +301,26 @@
     }
     html += '<section class="section tight">' +
       '<div class="eyebrow" style="margin-bottom:6px">Year at a glance</div>' +
-      glance(icoDown(), 'Income', fmt(inc, disp), Math.round(inc / maxT * 100) + '%', showNat(incN, disp), natStr(incN)) +
-      glance(icoUp(), 'Expenses', fmt(exp, disp), Math.round(exp / maxT * 100) + '%', showNat(expN, disp), natStr(expN)) +
-      glance(icoTrend(), 'Savings / Invest', fmt(sav, disp), Math.round(sav / maxT * 100) + '%', showNat(savN, disp), natStr(savN)) +
+      glance(icoDown(), 'Income', fmt(inc, disp), pct(inc, maxT), showNat(incN, disp), natStr(incN)) +
+      glance(icoUp(), 'Expenses', fmt(exp, disp), pct(exp, maxT), showNat(expN, disp), natStr(expN)) +
+      glance(icoTrend(), 'Saved (the rest)', fmtSigned(sav, disp), pct(sav, maxT), false, '') +
       '</section>';
 
     // month table
     html += '<div class="section-title-row"><h2>Month by month</h2><span class="hint">Tap a month to edit</span></div>';
     html += '<section class="table-wrap"><div class="table-scroll"><table class="months"><thead><tr>' +
-      '<th class="l">Month</th><th>Income</th><th>Expenses</th><th>Saved</th><th>Net</th></tr></thead><tbody>';
+      '<th class="l">Month</th><th>Income</th><th>Expenses</th><th>Saved</th></tr></thead><tbody>';
     months.forEach(function (m) {
       html += '<tr class="' + (m.has ? '' : 'empty') + '" data-act="openMonth" data-mo="' + m.mo + '">' +
         '<td class="name">' + m.name + '</td>' +
         '<td>' + (m.has ? h(fmt(m.inc, disp)) : '—') + '</td>' +
         '<td>' + (m.has ? h(fmt(m.exp, disp)) : '—') + '</td>' +
-        '<td>' + (m.has ? h(fmt(m.sav, disp)) : '—') + '</td>' +
-        '<td class="net">' + (m.has ? h(fmtSigned(m.net, disp)) : '—') + '</td></tr>';
+        '<td class="net">' + (m.has ? h(fmtSigned(m.sav, disp)) : '—') + '</td></tr>';
     });
     html += '</tbody><tfoot><tr>' +
       '<td class="name">' + year + ' total</td>' +
-      '<td>' + h(fmt(inc, disp)) + '</td><td>' + h(fmt(exp, disp)) + '</td><td>' + h(fmt(sav, disp)) + '</td>' +
-      '<td class="net">' + h(fmtSigned(inc - exp, disp)) + '</td></tr></tfoot></table></div></section>';
+      '<td>' + h(fmt(inc, disp)) + '</td><td>' + h(fmt(exp, disp)) + '</td>' +
+      '<td class="net">' + h(fmtSigned(sav, disp)) + '</td></tr></tfoot></table></div></section>';
 
     return html;
   }
@@ -364,7 +332,7 @@
     var yd = state.data[year] || {};
     var md = yd[mo] || { income: [], expenses: [], savings: [] };
 
-    var incT = sumConv(md.income, disp), expT = sumConv(md.expenses, disp), savT = sumConv(md.savings, disp);
+    var incT = sumConv(md.income, disp), expT = sumConv(md.expenses, disp), savT = incT - expT;
 
     var html = '<section class="section">' +
       '<div class="backrow"><button class="roundbtn" data-act="back">←</button><span class="eyebrow">All months</span></div>' +
@@ -376,7 +344,7 @@
       '<div class="legend">' +
         '<div class="item"><span class="dot"></span><span class="lbl">Income</span><span class="amt">' + h(fmt(incT, disp)) + '</span></div>' +
         '<div class="item"><span class="dot"></span><span class="lbl">Expenses</span><span class="amt">' + h(fmt(expT, disp)) + '</span></div>' +
-        '<div class="item"><span class="dot"></span><span class="lbl">Saved</span><span class="amt">' + h(fmt(savT, disp)) + '</span></div>' +
+        '<div class="item"><span class="dot"></span><span class="lbl">Saved</span><span class="amt">' + h(fmtSigned(savT, disp)) + '</span></div>' +
       '</div></section>';
 
     var missing = missingRecurring(year, mo);
@@ -389,8 +357,54 @@
     html += '<section class="buckets">' +
       bucket('income', 'Income', md.income, incT, disp) +
       bucket('expenses', 'Expenses', md.expenses, expT, disp) +
-      bucket('savings', 'Savings / Invest', md.savings, savT, disp) +
+      savingsBucket(md, savT, disp) +
       '</section>';
+    return html;
+  }
+
+  // Savings bucket: the total is the month's leftover (income − expenses).
+  // Any explicit allocations are listed; the remainder is auto-saved.
+  function savingsBucket(md, savT, disp) {
+    var h = hide;
+    var list = md.savings || [];
+    var committed = sumConv(list, disp);
+    var unalloc = savT - committed;
+    var anyActivity = (md.income || []).length + (md.expenses || []).length + list.length > 0;
+
+    var html = '<div class="bucket"><div class="bucket-head">' +
+      '<span class="k"><span class="dot"></span>Savings / Invest</span>' +
+      '<span class="v">' + h(fmtSigned(savT, disp)) + '</span></div>';
+
+    list.forEach(function (e) {
+      var isConv = e.currency !== disp;
+      html += '<div class="entry">' +
+        '<button class="main" data-act="edit" data-section="savings" data-id="' + attr(e.id) + '">' +
+          '<div class="nm">' + esc(e.name) +
+            (e.category ? '<span class="tag cat">' + esc(e.category) + '</span>' : '') +
+            (e.recurring ? '<span class="tag recur">' + icoRepeatSm() + 'Monthly</span>' : '') +
+          '</div>' +
+          (isConv ? '<div class="conv">≈ ' + h(fmt(conv(e.amount, e.currency, disp), disp)) + '</div>' : '') +
+        '</button>' +
+        '<div class="right"><span class="amt">' + h(fmt(e.amount, e.currency)) + '</span>' +
+          '<span class="tag">' + e.currency + '</span>' +
+          '<button class="del" data-act="delDirect" data-section="savings" data-id="' + attr(e.id) + '">×</button>' +
+        '</div></div>';
+    });
+
+    if (anyActivity) {
+      html += '<div class="entry auto">' +
+        '<div class="main" style="cursor:default">' +
+          '<div class="nm">' + (list.length ? 'Unallocated' : 'Left over') +
+            '<span class="tag auto">auto-saved</span></div>' +
+          '<div class="conv">Income − expenses' + (list.length ? ' − allocations' : '') + '</div>' +
+        '</div>' +
+        '<div class="right"><span class="amt">' + h(fmtSigned(unalloc, disp)) + '</span>' +
+          '<span class="tag">' + disp + '</span></div></div>';
+    } else {
+      html += '<div class="empty-note">Add income and expenses — whatever is left shows up here as savings.</div>';
+    }
+
+    html += '<button class="addbtn" data-act="add" data-section="savings">+ Allocate savings</button></div>';
     return html;
   }
 

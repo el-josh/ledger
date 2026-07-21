@@ -172,6 +172,9 @@ table.months tfoot td { border-top: 2px solid #e6e9e2; font-weight: 800; }
 .tag { font-size: 10px; letter-spacing: 0.05em; color: var(--muted); background: var(--line-2); border-radius: 6px; padding: 2px 6px; font-weight: 600; white-space: nowrap; }
 .tag.cat { background: #eef2ea; color: #5b6b52; }
 .tag.recur { background: #edf0f5; color: #4a5878; display: inline-flex; align-items: center; gap: 3px; }
+.tag.auto { background: #eae7f3; color: #5a4f7a; }
+.entry.auto .nm { font-weight: 700; }
+.entry.auto .conv { color: var(--muted); }
 .del { border: none; background: transparent; color: #c2c6bd; font-size: 18px; cursor: pointer; padding: 2px 4px; line-height: 1; }
 .del:hover { color: var(--ink); }
 .empty-note { padding: 16px 0; color: var(--muted-2); font-size: 13.5px; border-top: 1px solid var(--line-2); }

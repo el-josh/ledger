@@ -8,6 +8,9 @@ Implemented from the `Ledger.dc.html` design. Pure HTML/CSS/vanilla JS with no
 build step — open `index.html` in a browser and everything runs client-side.
 All data is stored in the browser's `localStorage`.
 
+The app **starts empty** — nothing is shown until you add income and expenses
+(or import a spreadsheet).
+
 ## Running
 
 Open `index.html` directly, or serve the folder:
@@ -35,6 +38,15 @@ Open **Rates** to manage conversion rates:
 > Get a token from your Wise account (Settings → API tokens). Because Ledger is
 > a purely client-side app, a browser may block the cross-origin Wise request
 > (CORS); if that happens the app tells you and manual rates keep working.
+
+### Automatic savings
+Savings is the money you don't spend. For each month, **Saved = Income −
+Expenses** — the leftover is calculated for you and shown in the *Savings /
+Invest* card as an auto-saved amount. You don't have to enter it.
+
+If you want to earmark part of that leftover (e.g. moved to an investment),
+use **+ Allocate savings**; the card then shows your allocation plus the
+remaining *Unallocated* amount, which always add up to the month's leftover.
 
 ### Categories & recurring memory
 Every entry has a **category** (Groceries, Housing, Utilities, Transport,
@@ -74,5 +86,5 @@ Category) and shows a preview. Adjust the column mapping if needed and import.
 
 ## Data & privacy
 Everything stays in your browser's `localStorage` under the key
-`pft-ledger-v2`. Nothing is sent anywhere except the optional, token-authorized
+`pft-ledger-v3`. Nothing is sent anywhere except the optional, token-authorized
 call to Wise for exchange rates.
