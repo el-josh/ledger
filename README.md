@@ -77,6 +77,47 @@ Category) and shows a preview. Adjust the column mapping if needed and import.
   negative amounts default to expenses.
 - Missing categories are auto-detected from the description.
 
+### Cross-device sync (optional, via Google sign-in)
+Sign in with Google and your ledger syncs to your account in real time, so you
+see the same data on your phone, laptop and anywhere else. It's **local-first**:
+the app keeps working offline against `localStorage` and syncs when online.
+
+Sync is **off until you add a Firebase config** — until then there's no sign-in
+button and nothing changes. To turn it on (one-time, ~5 minutes):
+
+**1. Create a Firebase project**
+- Go to <https://console.firebase.google.com> → *Add project* (free "Spark"
+  plan is enough). Skip Google Analytics if you like.
+
+**2. Enable Google sign-in**
+- Build → *Authentication* → *Get started* → *Sign-in method* → enable
+  **Google** → Save.
+
+**3. Create the database and lock it down**
+- Build → *Firestore Database* → *Create database* → Production mode.
+- Open the *Rules* tab, paste the contents of [`firestore.rules`](firestore.rules),
+  and *Publish*. (Each user can read/write only their own document.)
+
+**4. Get your web config**
+- Project settings (gear icon) → *Your apps* → add a **Web** app (`</>`).
+- Copy the `firebaseConfig` values into [`config.js`](config.js), replacing the
+  `YOUR_…` placeholders. These keys are safe to commit — Firebase web API keys
+  are public by design; the security rules above are what protect your data.
+
+**5. Host it (so sign-in works)**
+- Google sign-in needs a real `https://` origin — it won't run from a `file://`
+  path. The easiest host for this repo is **GitHub Pages**: repository
+  *Settings → Pages → Build and deployment → Deploy from a branch*, pick your
+  branch and `/ (root)`, Save. Your app appears at
+  `https://<user>.github.io/<repo>/`. (Netlify, Vercel or Cloudflare Pages work
+  too.)
+- Back in Firebase → *Authentication → Settings → Authorized domains*, add your
+  Pages domain (e.g. `your-user.github.io`).
+
+That's it — open the hosted URL, click **Sign in**, and use the same Google
+account on every device. First sign-in uploads whatever is already on that
+device; afterwards all devices share one synced ledger.
+
 ## Files
 
 | File | Purpose |
@@ -84,10 +125,13 @@ Category) and shows a preview. Adjust the column mapping if needed and import.
 | `index.html` | Page shell |
 | `styles.css` | Styles (design tokens from the mockup) |
 | `app.js` | All application logic |
+| `config.js` | Optional Firebase config for cross-device sync |
+| `firestore.rules` | Firestore security rules (per-user access) |
 | `vendor/xlsx.full.min.js` | SheetJS, for spreadsheet parsing |
 
 ## Data & privacy
-Everything stays in your browser's `localStorage` under the key
-`pft-ledger-v3`. The only outbound request is an anonymous, keyless call to a
-public exchange-rate service to refresh conversion rates; no personal or
-financial data leaves your browser.
+By default everything stays in your browser's `localStorage` under the key
+`pft-ledger-v3`, and the only outbound request is an anonymous, keyless call to
+a public exchange-rate service. If you enable sync (above), your ledger is also
+stored in your own Firestore document, readable and writable only by your
+signed-in account.

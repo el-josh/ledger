@@ -50,7 +50,7 @@
       // transient view state
       view: 'dashboard', activeMonth: null, modal: null,
       settingsOpen: false, ratesMsg: null, recurringOpen: false,
-      importData: null, toast: null
+      importData: null, toast: null, accountOpen: false
     };
   }
 
@@ -70,19 +70,32 @@
         recurring: o.recurring || [],
         view: 'dashboard', activeMonth: null, modal: null,
         settingsOpen: false, ratesMsg: null, recurringOpen: false,
-        importData: null, toast: null
+        importData: null, toast: null, accountOpen: false
       };
     } catch (e) { return null; }
   }
 
+  // The persisted slice of state — shared by localStorage and cloud sync.
+  function persistedPayload() {
+    return {
+      data: state.data, rates: state.rates, ratesMeta: state.ratesMeta,
+      displayCurrency: state.displayCurrency, year: state.year,
+      hidden: state.hidden, recurring: state.recurring
+    };
+  }
+  function assignPersisted(o) {
+    if (!o) return;
+    state.data = o.data || {};
+    state.rates = o.rates || { NGN: 1, USD: 1600, EUR: 1750 };
+    state.ratesMeta = o.ratesMeta || { updated: null, source: 'manual' };
+    state.displayCurrency = o.displayCurrency || 'NGN';
+    state.year = o.year || new Date().getFullYear();
+    state.hidden = !!o.hidden;
+    state.recurring = o.recurring || [];
+  }
   function persist() {
-    try {
-      localStorage.setItem(KEY, JSON.stringify({
-        data: state.data, rates: state.rates, ratesMeta: state.ratesMeta,
-        wiseToken: state.wiseToken, displayCurrency: state.displayCurrency,
-        year: state.year, hidden: state.hidden, recurring: state.recurring
-      }));
-    } catch (e) {}
+    try { localStorage.setItem(KEY, JSON.stringify(persistedPayload())); } catch (e) {}
+    if (cloud.signedIn && !cloud.applyingRemote) scheduleCloudSave(false);
   }
 
   function genId() { return 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
@@ -243,6 +256,119 @@
   }
 
   // =========================================================================
+  //  CLOUD SYNC  (Firebase Auth + Firestore, local-first, optional)
+  // =========================================================================
+  var cloud = {
+    configured: false, ready: false, signedIn: false, user: null,
+    status: '', error: '', authMod: null, fs: null, auth: null, db: null,
+    docRef: null, unsub: null, saveTimer: null, applyingRemote: false
+  };
+
+  function initCloud() {
+    var cfg = window.LEDGER_CONFIG && window.LEDGER_CONFIG.firebase;
+    if (!cfg || !cfg.apiKey || /YOUR_|paste|xxxx/i.test(cfg.apiKey) || !cfg.projectId || /YOUR_/i.test(cfg.projectId)) {
+      cloud.configured = false; return; // no config yet -> stay fully local
+    }
+    cloud.configured = true;
+    render(); // reveal the Sign in button right away
+    var base = 'https://www.gstatic.com/firebasejs/10.12.5/';
+    Promise.all([
+      import(base + 'firebase-app.js'),
+      import(base + 'firebase-auth.js'),
+      import(base + 'firebase-firestore.js')
+    ]).then(function (mods) {
+      var appMod = mods[0]; cloud.authMod = mods[1]; cloud.fs = mods[2];
+      var appI = appMod.initializeApp(cfg);
+      cloud.auth = cloud.authMod.getAuth(appI);
+      cloud.db = cloud.fs.getFirestore(appI);
+      cloud.ready = true;
+      cloud.authMod.onAuthStateChanged(cloud.auth, onAuthChanged);
+      if (cloud.authMod.getRedirectResult) cloud.authMod.getRedirectResult(cloud.auth).catch(function () {});
+    }).catch(function (e) {
+      cloud.error = 'Sign-in unavailable: ' + (e && e.message || e);
+      render();
+    });
+  }
+
+  function cloudSignIn() {
+    if (!cloud.configured) return;
+    if (!cloud.ready) { cloud.status = 'Loading sign-in…'; render(); return; }
+    cloud.error = '';
+    var provider = new cloud.authMod.GoogleAuthProvider();
+    cloud.authMod.signInWithPopup(cloud.auth, provider).catch(function (e) {
+      var code = (e && e.code) || '';
+      if (code.indexOf('popup') >= 0) {
+        cloud.authMod.signInWithRedirect(cloud.auth, provider).catch(function (e2) {
+          cloud.error = 'Sign-in failed: ' + (e2.message || e2.code); render();
+        });
+      } else { cloud.error = 'Sign-in failed: ' + (e.message || code); render(); }
+    });
+  }
+
+  function cloudSignOut() {
+    if (cloud.authMod && cloud.auth) cloud.authMod.signOut(cloud.auth).catch(function () {});
+    state.accountOpen = false;
+  }
+
+  function onAuthChanged(user) {
+    if (cloud.unsub) { cloud.unsub(); cloud.unsub = null; }
+    if (user) {
+      cloud.signedIn = true;
+      cloud.user = { name: user.displayName, email: user.email, photo: user.photoURL, uid: user.uid };
+      cloud.status = 'Connecting…'; cloud.error = '';
+      subscribeDoc(user.uid);
+    } else {
+      cloud.signedIn = false; cloud.user = null; cloud.docRef = null; cloud.status = '';
+    }
+    render();
+  }
+
+  function subscribeDoc(uid) {
+    var fs = cloud.fs;
+    cloud.docRef = fs.doc(cloud.db, 'ledgers', uid);
+    cloud.unsub = fs.onSnapshot(cloud.docRef, function (snap) {
+      if (snap.metadata.hasPendingWrites) return; // ignore our own local echo
+      var d = snap.exists() ? snap.data() : null;
+      if (!d || !d.payload) {
+        // Account has no data yet -> seed it from this device.
+        cloud.status = 'Synced';
+        scheduleCloudSave(true);
+        if (state.accountOpen) render();
+        return;
+      }
+      applyRemote(d.payload);
+      cloud.status = 'Synced';
+      if (state.accountOpen) render();
+    }, function (err) {
+      cloud.error = 'Sync error: ' + err.message;
+      if (state.accountOpen) render();
+    });
+  }
+
+  function applyRemote(payload) {
+    cloud.applyingRemote = true;
+    assignPersisted(payload);
+    render();                 // render()->persist() sees applyingRemote and skips cloud push
+    cloud.applyingRemote = false;
+  }
+
+  function scheduleCloudSave(immediate) {
+    if (!cloud.signedIn || !cloud.docRef) return;
+    if (cloud.saveTimer) { clearTimeout(cloud.saveTimer); cloud.saveTimer = null; }
+    var doSave = function () {
+      cloud.saveTimer = null;
+      cloud.status = 'Saving…'; if (state.accountOpen) render();
+      cloud.fs.setDoc(cloud.docRef, { v: 3, updatedAt: cloud.fs.serverTimestamp(), payload: persistedPayload() })
+        .then(function () { cloud.status = 'Synced'; if (state.accountOpen) render(); })
+        .catch(function (e) { cloud.error = 'Save failed: ' + e.message; if (state.accountOpen) render(); });
+    };
+    if (immediate) doSave(); else cloud.saveTimer = setTimeout(doSave, 900);
+  }
+
+  function firstNameOf(u) { var n = (u.name || '').trim(); if (n) return n.split(/\s+/)[0]; return ((u.email || '').split('@')[0]) || 'Account'; }
+  function initialOf(u) { return (((u.name || u.email || '?').trim())[0] || '?').toUpperCase(); }
+
+  // =========================================================================
   //  RENDER
   // =========================================================================
   var app = document.getElementById('app');
@@ -256,6 +382,7 @@
     if (state.settingsOpen) html += renderSettingsHtml();
     if (state.recurringOpen) html += renderRecurringHtml();
     if (state.importData) html += renderImportHtml();
+    if (state.accountOpen) html += renderAccountHtml();
     if (state.toast) html += '<div class="toast">' + esc(state.toast) + '</div>';
     app.innerHTML = html;
     persist();
@@ -277,8 +404,42 @@
           '<button class="pill" data-act="openRecurring" title="Recurring items">' + icoRepeat() + 'Recurring</button>' +
           '<button class="pill" data-act="openImport" title="Import a spreadsheet">' + icoUpload() + 'Import</button>' +
           '<button class="pill" data-act="openSettings">' + icoRate() + 'Rates</button>' +
+          authControl() +
         '</div>' +
       '</header>';
+  }
+
+  function authControl() {
+    if (!cloud.configured) return '';
+    if (cloud.signedIn && cloud.user) {
+      var u = cloud.user;
+      var av = u.photo
+        ? '<img class="avatar" src="' + attr(u.photo) + '" alt="" referrerpolicy="no-referrer">'
+        : '<span class="avatar avatar-fallback">' + esc(initialOf(u)) + '</span>';
+      return '<button class="pill" data-act="openAccount" title="Account & sync">' + av + esc(firstNameOf(u)) + '</button>';
+    }
+    return '<button class="pill" data-act="signIn" title="Sign in to sync across devices">' + icoGoogle() + 'Sign in</button>';
+  }
+
+  function renderAccountHtml() {
+    var u = cloud.user || {};
+    var av = u.photo
+      ? '<img class="avatar lg" src="' + attr(u.photo) + '" alt="" referrerpolicy="no-referrer">'
+      : '<span class="avatar lg avatar-fallback">' + esc(initialOf(u)) + '</span>';
+    var statusText = cloud.error || cloud.status || 'Synced';
+    var statusCls = cloud.error ? 'err' : 'ok';
+    return '<div class="overlay" data-act="closeAccount"><div class="modal" data-stop="1">' +
+      '<div style="display:flex;align-items:center;gap:14px;">' + av +
+        '<div style="min-width:0;"><div style="font-weight:800;font-size:17px;letter-spacing:-0.01em;">' + esc(u.name || 'Signed in') + '</div>' +
+        '<div style="color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;">' + esc(u.email || '') + '</div></div>' +
+      '</div>' +
+      '<div class="desc" style="margin-top:16px;">Your ledger syncs to your Google account in real time. Open Ledger and sign in with the same account on any device to pick up right where you left off.</div>' +
+      '<div class="' + statusCls + '">' + esc(statusText) + '</div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn danger-text" data-act="signOut">Sign out</button>' +
+        '<div class="spacer"></div>' +
+        '<button class="btn primary" data-act="closeAccount">Done</button>' +
+      '</div></div></div>';
   }
 
   // ---- dashboard ----------------------------------------------------------
@@ -1034,6 +1195,11 @@
       case 'runImport': runImport(); break;
       case 'runLedgerImport': runLedgerImport(); break;
       case 'closeImport': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.importData = null; render(); } break;
+
+      case 'signIn': cloudSignIn(); break;
+      case 'openAccount': state.accountOpen = true; render(); break;
+      case 'closeAccount': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.accountOpen = false; render(); } break;
+      case 'signOut': cloudSignOut(); render(); break;
     }
   });
 
@@ -1046,6 +1212,7 @@
       if (state.settingsOpen) { state.settingsOpen = false; render(); }
       else if (state.recurringOpen) { state.recurringOpen = false; render(); }
       else if (state.importData) { state.importData = null; render(); }
+      else if (state.accountOpen) { state.accountOpen = false; render(); }
     }
   });
 
@@ -1089,10 +1256,12 @@
   function icoRepeatSm() { return '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>'; }
   function icoUpload() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'; }
   function icoRate() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l-3-3"/><path d="M21 17H8l3 3"/></svg>'; }
+  function icoGoogle() { return '<svg width="15" height="15" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>'; }
 
   // =========================================================================
   //  BOOT
   // =========================================================================
   render();
   autoFetchRates();
+  initCloud();
 })();
