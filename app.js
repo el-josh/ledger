@@ -50,6 +50,13 @@
     ['Savings',       ['invest','saving','stock','crypto','mutual','bond','pension']]
   ];
 
+  // Fallback rates (Naira per unit) so the pinned currencies always convert,
+  // even before a live fetch. RATES_V marks a map as multi-currency (v2); older
+  // saved maps lack it and trigger a one-time refresh.
+  var DEFAULT_RATES = { NGN: 1, USD: 1600, GBP: 2000, EUR: 1750, CAD: 1150 };
+  var RATES_V = 2;
+  function mergeRates(saved) { return Object.assign({}, DEFAULT_RATES, saved || {}); }
+
   // ---- state --------------------------------------------------------------
   var state = load() || seed();
 
@@ -57,7 +64,7 @@
   function seed() {
     return {
       data: {},
-      rates: { NGN: 1, USD: 1600, GBP: 2000, EUR: 1750, CAD: 1150 },
+      rates: mergeRates(),
       ratesMeta: { updated: null, source: 'default' },
       wiseToken: '',
       displayCurrency: 'NGN',
@@ -78,8 +85,8 @@
       var o = JSON.parse(raw);
       return {
         data: o.data || {},
-        rates: o.rates || { NGN: 1, USD: 1600, EUR: 1750 },
-        ratesMeta: o.ratesMeta || { updated: null, source: 'manual' },
+        rates: mergeRates(o.rates),
+        ratesMeta: o.ratesMeta || { updated: null, source: 'default' },
         wiseToken: o.wiseToken || '',
         displayCurrency: o.displayCurrency || 'NGN',
         year: o.year || new Date().getFullYear(),
@@ -103,7 +110,7 @@
   function assignPersisted(o) {
     if (!o) return;
     state.data = o.data || {};
-    state.rates = o.rates || { NGN: 1, USD: 1600, GBP: 2000, EUR: 1750, CAD: 1150 };
+    state.rates = mergeRates(o.rates);
     state.ratesMeta = o.ratesMeta || { updated: null, source: 'default' };
     state.displayCurrency = o.displayCurrency || 'NGN';
     state.year = o.year || new Date().getFullYear();
@@ -269,8 +276,8 @@
     opts = opts || {};
     if (!opts.silent) { state.ratesMsg = { type: 'info', text: 'Fetching latest rates…' }; if (state.settingsOpen) render(); }
     fetchErApi().catch(function () { return fetchFawaz(); }).then(function (res) {
-      state.rates = res.rates;
-      state.ratesMeta = { updated: new Date().toISOString(), source: 'live', provider: res.provider };
+      state.rates = mergeRates(res.rates);
+      state.ratesMeta = { updated: new Date().toISOString(), source: 'live', provider: res.provider, v: RATES_V };
       state.ratesMsg = { type: 'ok', text: 'Updated from ' + res.provider + '.' };
       persist();
       render();
@@ -283,11 +290,12 @@
   }
 
   function autoFetchRates() {
-    var last = state.ratesMeta && state.ratesMeta.updated ? Date.parse(state.ratesMeta.updated) : 0;
-    var fresh = state.ratesMeta && state.ratesMeta.source === 'live' && (Date.now() - last) < 12 * 3600 * 1000;
-    // Also refetch when the saved map predates multi-currency (missing pinned rates).
-    var complete = PINNED.every(function (c) { return state.rates[c] > 0; });
-    if (fresh && complete) return;
+    var m = state.ratesMeta || {};
+    var last = m.updated ? Date.parse(m.updated) : 0;
+    // Fresh only if it's a live, multi-currency (v2) map from the last 12h.
+    // Older maps (no v, or v<2 from the USD/EUR-only era) always refetch.
+    var fresh = m.source === 'live' && m.v === RATES_V && (Date.now() - last) < 12 * 3600 * 1000;
+    if (fresh) return;
     fetchRates({ silent: true });
   }
 
@@ -393,6 +401,9 @@
         if (hasLocalData()) scheduleCloudSave(true);
         if (state.accountOpen) render();
       }
+      // The restored rate map may predate multi-currency (only USD/EUR). Upgrade
+      // it once now that we're hydrated; the fetch persists the full map back up.
+      autoFetchRates();
     }, function (err) {
       cloud.hydrating = false;
       cloud.error = 'Sync error: ' + err.message;
