@@ -34,7 +34,7 @@ jobs:
       - name: Assemble site (app files only)
         run: |
           mkdir -p _site/vendor
-          cp index.html styles.css app.js config.js favicon.svg _site/
+          cp index.html styles.css app.js config.js favicon.svg og-banner.png _site/
           cp vendor/xlsx.full.min.js _site/vendor/
 
       - name: Configure Pages
