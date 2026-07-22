@@ -22,12 +22,14 @@ python3 -m http.server 8000   # then visit http://localhost:8000
 ## Features
 
 ### Multi-currency with automatic live rates
-Toggle the display currency (₦ NGN / $ USD / € EUR) in the header. Each entry
-keeps its own original currency; totals are converted on the fly.
+Pick your display currency from the header dropdown — **any** ISO currency is
+available, with NGN, USD, GBP, EUR and CAD pinned at the top. Entries can be
+recorded in any currency too; each keeps its original currency and totals are
+converted on the fly (symbols and formatting come from the browser's `Intl`).
 
 Rates are fetched **automatically — no API key, token or sign-up required.** On
 load (and whenever you press **Rates → Refresh rates**) the app pulls live
-mid-market rates from a keyless, CORS-enabled source:
+mid-market rates for all currencies from a keyless, CORS-enabled source:
 
 1. [ExchangeRate-API open endpoint](https://open.er-api.com) —
    `GET https://open.er-api.com/v6/latest/NGN` (primary)
@@ -37,9 +39,15 @@ mid-market rates from a keyless, CORS-enabled source:
 Rates refresh silently on load when the saved ones are more than 12 hours old.
 If you're offline, the last saved rates are kept.
 
-- **Manual override (optional)** — under **Rates** you can still pin your own
-  Naira value for $1 / €1 (handy for a parallel-market rate). It stays until you
-  refresh. You never *have* to set anything manually.
+### Export a statement of account
+Press **Export** to download a detailed statement for the selected year:
+
+- **Excel (.xlsx)** — a *Statement* sheet with every income, expense and saving
+  entry (month, type, name, category, original amount + currency, and the amount
+  converted to your display currency), plus a *Summary* sheet of monthly and
+  yearly totals.
+- **PDF** — a printable statement (via your browser's Print → *Save as PDF*)
+  with the same summary and detailed breakdown.
 
 ### Automatic savings
 Savings is the money you don't spend. For each month, **Saved = Income −

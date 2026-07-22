@@ -10,9 +10,26 @@
   'use strict';
 
   // ---- constants ----------------------------------------------------------
-  var SYM  = { NGN: '₦', USD: '$', EUR: '€' };
-  var NAME = { NGN: '₦ NGN', USD: '$ USD', EUR: '€ EUR' };
-  var CURS = ['NGN', 'USD', 'EUR'];
+  // Currencies the picker offers. PINNED show first; the rest are ISO 4217.
+  var PINNED = ['NGN', 'USD', 'GBP', 'EUR', 'CAD'];
+  var CURRENCY_CODES = ['NGN','USD','GBP','EUR','CAD','AED','AFN','ALL','AMD','ANG','AOA','ARS','AUD','AWG','AZN','BAM','BBD','BDT','BGN','BHD','BIF','BMD','BND','BOB','BRL','BSD','BTN','BWP','BYN','BZD','CDF','CHF','CLP','CNY','COP','CRC','CUP','CVE','CZK','DJF','DKK','DOP','DZD','EGP','ERN','ETB','FJD','FKP','GEL','GHS','GIP','GMD','GNF','GTQ','GYD','HKD','HNL','HRK','HTG','HUF','IDR','ILS','INR','IQD','IRR','ISK','JMD','JOD','JPY','KES','KGS','KHR','KMF','KRW','KWD','KYD','KZT','LAK','LBP','LKR','LRD','LSL','LYD','MAD','MDL','MGA','MKD','MMK','MNT','MOP','MRU','MUR','MVR','MWK','MXN','MYR','MZN','NAD','NIO','NOK','NPR','NZD','OMR','PAB','PEN','PGK','PHP','PKR','PLN','PYG','QAR','RON','RSD','RUB','RWF','SAR','SBD','SCR','SDG','SEK','SGD','SHP','SLE','SOS','SRD','SSP','STN','SVC','SYP','SZL','THB','TJS','TMT','TND','TOP','TRY','TTD','TWD','TZS','UAH','UGX','UYU','UZS','VES','VND','VUV','WST','XAF','XCD','XOF','XPF','YER','ZAR','ZMW','ZWL'];
+  var _curNames = (function () { try { return new Intl.DisplayNames(['en'], { type: 'currency' }); } catch (e) { return null; } })();
+  var _nameCache = {}, _symCache = {};
+  function curName(c) {
+    if (_nameCache[c] != null) return _nameCache[c];
+    var v = c; try { v = (_curNames && _curNames.of(c)) || c; } catch (e) {}
+    return (_nameCache[c] = v);
+  }
+  function curSymbol(c) {
+    if (_symCache[c] != null) return _symCache[c];
+    var v = c;
+    try {
+      var parts = new Intl.NumberFormat('en-US', { style: 'currency', currency: c, currencyDisplay: 'narrowSymbol' }).formatToParts(0);
+      for (var i = 0; i < parts.length; i++) if (parts[i].type === 'currency') { v = parts[i].value; break; }
+    } catch (e) {}
+    return (_symCache[c] = v);
+  }
+  function curLabel(c) { return curSymbol(c) + ' ' + c; }           // e.g. "₦ NGN"
   var MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   var SECTIONS = { income: 'income', expenses: 'expense', savings: 'saving' };
   var KEY = 'pft-ledger-v3';
@@ -40,8 +57,8 @@
   function seed() {
     return {
       data: {},
-      rates: { NGN: 1, USD: 1600, EUR: 1750 },
-      ratesMeta: { updated: null, source: 'manual' },
+      rates: { NGN: 1, USD: 1600, GBP: 2000, EUR: 1750, CAD: 1150 },
+      ratesMeta: { updated: null, source: 'default' },
       wiseToken: '',
       displayCurrency: 'NGN',
       year: new Date().getFullYear(),
@@ -50,7 +67,7 @@
       // transient view state
       view: 'dashboard', activeMonth: null, modal: null,
       settingsOpen: false, ratesMsg: null, recurringOpen: false,
-      importData: null, toast: null, accountOpen: false
+      importData: null, toast: null, accountOpen: false, exportOpen: false
     };
   }
 
@@ -70,7 +87,7 @@
         recurring: o.recurring || [],
         view: 'dashboard', activeMonth: null, modal: null,
         settingsOpen: false, ratesMsg: null, recurringOpen: false,
-        importData: null, toast: null, accountOpen: false
+        importData: null, toast: null, accountOpen: false, exportOpen: false
       };
     } catch (e) { return null; }
   }
@@ -86,8 +103,8 @@
   function assignPersisted(o) {
     if (!o) return;
     state.data = o.data || {};
-    state.rates = o.rates || { NGN: 1, USD: 1600, EUR: 1750 };
-    state.ratesMeta = o.ratesMeta || { updated: null, source: 'manual' };
+    state.rates = o.rates || { NGN: 1, USD: 1600, GBP: 2000, EUR: 1750, CAD: 1150 };
+    state.ratesMeta = o.ratesMeta || { updated: null, source: 'default' };
     state.displayCurrency = o.displayCurrency || 'NGN';
     state.year = o.year || new Date().getFullYear();
     state.hidden = !!o.hidden;
@@ -102,9 +119,16 @@
 
   // ---- money helpers ------------------------------------------------------
   function conv(a, from, to) { var r = state.rates; return a * (r[from] || 1) / (r[to] || 1); }
+  var _fmtCache = {};
   function fmt(a, cur) {
-    var opts = cur === 'NGN' ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 0, maximumFractionDigits: 2 };
-    return (SYM[cur] || '') + new Intl.NumberFormat('en-US', opts).format(a);
+    var f = _fmtCache[cur];
+    if (f === undefined) {
+      try { f = new Intl.NumberFormat('en-US', { style: 'currency', currency: cur, currencyDisplay: 'narrowSymbol', minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
+      catch (e) { f = null; }
+      _fmtCache[cur] = f;
+    }
+    if (f) return f.format(a);
+    return cur + ' ' + new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(a);
   }
   function fmtSigned(a, cur) { var s = a < -0.005 ? '−' : ''; return s + fmt(Math.abs(a), cur); }
   // Group an amount string's integer part with thousands commas as it's typed.
@@ -133,8 +157,9 @@
   }
   function sumConv(list, to) { return (list || []).reduce(function (s, e) { return s + conv(e.amount, e.currency, to); }, 0); }
   function addNative(o, list) { (list || []).forEach(function (e) { o[e.currency] = (o[e.currency] || 0) + e.amount; }); }
-  function showNat(o, disp) { var ks = CURS.filter(function (c) { return o[c] > 0; }); return ks.length > 1 || (ks.length === 1 && ks[0] !== disp); }
-  function natStr(o) { return CURS.filter(function (c) { return o[c] > 0; }).map(function (c) { return fmt(o[c], c); }).join('   +   '); }
+  function natKeys(o) { return Object.keys(o).filter(function (c) { return o[c] > 0; }).sort(); }
+  function showNat(o, disp) { var ks = natKeys(o); return ks.length > 1 || (ks.length === 1 && ks[0] !== disp); }
+  function natStr(o) { return natKeys(o).map(function (c) { return fmt(o[c], c); }).join('   +   '); }
   // "The rest goes to savings": whatever income leaves after expenses is saved.
   function savedOf(md, to) { return sumConv(md.income, to) - sumConv(md.expenses, to); }
   function pct(n, d) { return Math.max(0, Math.min(100, Math.round((n / (d || 1)) * 100))) + '%'; }
@@ -201,20 +226,29 @@
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
   // ---- live exchange rates (keyless) -------------------------------------
-  // Rates are quoted as "Naira per 1 unit". Two free, no-key, CORS-enabled
-  // sources are tried in turn:
+  // Rates are stored as "Naira per 1 unit" for every currency the source
+  // returns. Two free, no-key, CORS-enabled sources are tried in turn:
   //   1. ExchangeRate-API open endpoint  https://open.er-api.com/v6/latest/NGN
   //   2. @fawazahmed0 currency-api (jsDelivr CDN) as a fallback
-  // Both return how much of each currency 1 NGN buys, so we invert to get the
-  // Naira value of 1 USD / 1 EUR.
+  // Both return how much of each currency 1 NGN buys, so we invert each one.
+  function invertMap(units) {
+    var map = { NGN: 1 };
+    Object.keys(units || {}).forEach(function (c) {
+      var code = c.toUpperCase();
+      var v = units[c];
+      if (v > 0) map[code] = 1 / v;
+    });
+    map.NGN = 1;
+    return map;
+  }
   function fetchErApi() {
     return fetch('https://open.er-api.com/v6/latest/NGN').then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();
     }).then(function (j) {
       if (j.result && j.result !== 'success') throw new Error('provider error');
       var rt = j.rates || {};
-      if (!(rt.USD > 0) || !(rt.EUR > 0)) throw new Error('missing rates');
-      return { usd: 1 / rt.USD, eur: 1 / rt.EUR, provider: 'ExchangeRate-API' };
+      if (!(rt.USD > 0)) throw new Error('missing rates');
+      return { rates: invertMap(rt), provider: 'ExchangeRate-API' };
     });
   }
   function fetchFawaz() {
@@ -226,8 +260,8 @@
       if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();
     }).then(function (j) {
       var n = j.ngn || {};
-      if (!(n.usd > 0) || !(n.eur > 0)) throw new Error('missing rates');
-      return { usd: 1 / n.usd, eur: 1 / n.eur, provider: 'Currency-API' };
+      if (!(n.usd > 0)) throw new Error('missing rates');
+      return { rates: invertMap(n), provider: 'Currency-API' };
     });
   }
 
@@ -235,7 +269,7 @@
     opts = opts || {};
     if (!opts.silent) { state.ratesMsg = { type: 'info', text: 'Fetching latest rates…' }; if (state.settingsOpen) render(); }
     fetchErApi().catch(function () { return fetchFawaz(); }).then(function (res) {
-      state.rates = { NGN: 1, USD: res.usd, EUR: res.eur };
+      state.rates = res.rates;
       state.ratesMeta = { updated: new Date().toISOString(), source: 'live', provider: res.provider };
       state.ratesMsg = { type: 'ok', text: 'Updated from ' + res.provider + '.' };
       persist();
@@ -250,8 +284,10 @@
 
   function autoFetchRates() {
     var last = state.ratesMeta && state.ratesMeta.updated ? Date.parse(state.ratesMeta.updated) : 0;
-    // Refresh silently on load unless we already have live rates from the last 12h.
-    if (state.ratesMeta && state.ratesMeta.source === 'live' && (Date.now() - last) < 12 * 3600 * 1000) return;
+    var fresh = state.ratesMeta && state.ratesMeta.source === 'live' && (Date.now() - last) < 12 * 3600 * 1000;
+    // Also refetch when the saved map predates multi-currency (missing pinned rates).
+    var complete = PINNED.every(function (c) { return state.rates[c] > 0; });
+    if (fresh && complete) return;
     fetchRates({ silent: true });
   }
 
@@ -414,20 +450,32 @@
     if (state.recurringOpen) html += renderRecurringHtml();
     if (state.importData) html += renderImportHtml();
     if (state.accountOpen) html += renderAccountHtml();
+    if (state.exportOpen) html += renderExportHtml();
     if (state.toast) html += '<div class="toast">' + esc(state.toast) + '</div>';
     app.innerHTML = html;
     persist();
   }
 
+  // Currency <option>s: pinned currencies first, then all others by name.
+  function currencyOptions(selected, withNames) {
+    var opt = function (c) {
+      var label = withNames ? (curLabel(c) + ' — ' + curName(c)) : curLabel(c);
+      return '<option value="' + c + '"' + (c === selected ? ' selected' : '') + '>' + esc(label) + '</option>';
+    };
+    var rest = CURRENCY_CODES.filter(function (c) { return PINNED.indexOf(c) < 0; })
+      .sort(function (a, b) { return curName(a).localeCompare(curName(b)); });
+    return '<optgroup label="Common">' + PINNED.map(opt).join('') + '</optgroup>' +
+           '<optgroup label="All currencies">' + rest.map(opt).join('') + '</optgroup>';
+  }
+
   function renderHeader() {
     var disp = state.displayCurrency;
-    function curBtn(c) { return '<button class="seg' + (disp === c ? ' active' : '') + '" data-act="cur" data-cur="' + c + '">' + NAME[c] + '</button>'; }
     return '' +
       '<header class="header">' +
         '<div class="brand"><span class="logo">L</span><span class="name">Ledger</span></div>' +
         '<div class="account">' + authControl() + '</div>' +
         '<div class="grp grp-currency">' +
-          '<div class="segset">' + curBtn('NGN') + curBtn('USD') + curBtn('EUR') + '</div>' +
+          '<div class="cur-wrap"><select id="disp-cur" class="cur-select" title="Display currency">' + currencyOptions(disp, false) + '</select></div>' +
           '<div class="yearnav">' +
             '<button data-act="year" data-d="-1">‹</button>' +
             '<span class="label">' + state.year + '</span>' +
@@ -435,8 +483,9 @@
           '</div>' +
         '</div>' +
         '<div class="grp grp-actions">' +
+          '<button class="pill" data-act="openExport" title="Export a statement">' + icoDownload() + 'Export</button>' +
           '<button class="pill" data-act="openRecurring" title="Recurring items">' + icoRepeat() + 'Recurring</button>' +
-          '<button class="pill" data-act="openImport" title="Import a spreadsheet">' + icoUpload() + 'Import</button>' +
+          '<button class="pill" data-act="openImport" title="Import a spreadsheet">' + icoUpload() + 'Import .xlsx</button>' +
           '<button class="pill" data-act="openSettings">' + icoRate() + 'Rates</button>' +
         '</div>' +
       '</header>';
@@ -490,7 +539,7 @@
     });
 
     var inc = 0, exp = 0;
-    var incN = { NGN: 0, USD: 0, EUR: 0 }, expN = { NGN: 0, USD: 0, EUR: 0 };
+    var incN = {}, expN = {};
     Object.keys(yearData).forEach(function (k) {
       var md = yearData[k];
       inc += sumConv(md.income, disp); exp += sumConv(md.expenses, disp);
@@ -515,7 +564,7 @@
         '<button class="iconbtn" data-act="hide" title="Hide balance">' + eyeIcon() + '</button>' +
       '</div>' +
       '<div class="hero-value">' + h(fmtSigned(inc - exp, disp)) + '</div>' +
-      '<div class="hero-sub">Income minus expenses · displayed in ' + NAME[disp] + '</div>' +
+      '<div class="hero-sub">Income minus expenses · displayed in ' + esc(curLabel(disp)) + '</div>' +
       '</div>';
     if (bars.length) {
       html += '<div class="bars">' + bars.map(function (b) {
@@ -670,7 +719,6 @@
   function renderModal() {
     var m = state.modal;
     var title = (m.mode === 'edit' ? 'Edit ' : 'Add ') + SECTIONS[m.section];
-    function seg(c) { return '<button class="seg' + (m.currency === c ? ' active' : '') + '" data-act="mCur" data-cur="' + c + '">' + NAME[c] + '</button>'; }
     var catOpts = CATEGORIES.map(function (c) { return '<option value="' + attr(c) + '"' + (m.category === c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
     return '<div class="overlay" data-act="closeModal"><div class="modal" data-stop="1">' +
       '<div class="title">' + esc(title) + '</div>' +
@@ -679,7 +727,7 @@
       '<label class="field"><span class="lbl">Amount</span>' +
         '<input id="m-amount" type="text" inputmode="decimal" autocomplete="off" value="' + attr(groupThousands(m.amount)) + '" placeholder="0"></label>' +
       '<label class="field"><span class="lbl">Category</span><select id="m-category">' + catOpts + '</select></label>' +
-      '<div class="field"><span class="lbl">Currency</span><div class="segset full">' + seg('NGN') + seg('USD') + seg('EUR') + '</div></div>' +
+      '<label class="field"><span class="lbl">Currency</span><select id="m-currency">' + currencyOptions(m.currency, true) + '</select></label>' +
       '<label class="checkrow"><input id="m-recur" type="checkbox"' + (m.recurring ? ' checked' : '') + '>' +
         '<span><span class="txt">Repeat every month</span><div class="sub">Remember this so you don’t re-enter it next month.</div></span></label>' +
       (m.error ? '<div class="err">Enter a name and an amount greater than zero.</div>' : '') +
@@ -695,35 +743,26 @@
   function renderSettingsHtml() {
     var r = state.rates, meta = state.ratesMeta || {};
     var updated = meta.updated ? new Date(meta.updated).toLocaleString() : 'never';
-    var srcLabel = meta.source === 'live' ? ('Live · ' + (meta.provider || 'auto')) : (meta.source === 'manual' ? 'Manual override' : 'Default');
+    var srcLabel = meta.source === 'live' ? ('Live · ' + (meta.provider || 'auto')) : 'Default';
     var msg = state.ratesMsg;
+    var rateRows = PINNED.filter(function (c) { return c !== 'NGN' && r[c] > 0; }).map(function (c) {
+      return '<div class="rate-row"><span>' + esc(curLabel(c)) + '</span><strong>' + fmt(r[c], 'NGN') + '</strong></div>';
+    }).join('');
     return '<div class="overlay" data-act="closeSettings"><div class="modal" data-stop="1">' +
       '<div class="title">Exchange rates</div>' +
-      '<div class="desc">Live mid-market rates (Naira per 1 unit), fetched automatically — no API key or sign-up needed. Entries keep their original currency; this only affects converted totals.</div>' +
+      '<div class="desc">Live mid-market rates, fetched automatically — no API key or sign-up needed. Rates below are shown as Naira per 1 unit. Entries keep their original currency; this only affects converted totals.</div>' +
 
       '<div class="rate-status">' +
         '<div class="rate-row"><span>Source</span><strong>' + esc(srcLabel) + '</strong></div>' +
         '<div class="rate-row"><span>Last updated</span><strong>' + esc(updated) + '</strong></div>' +
-        '<div class="rate-row"><span>₦ / $ USD</span><strong>' + fmt(r.USD, 'NGN') + '</strong></div>' +
-        '<div class="rate-row"><span>₦ / € EUR</span><strong>' + fmt(r.EUR, 'NGN') + '</strong></div>' +
-      '</div>' +
-      '<div class="modal-actions" style="margin-top:14px">' +
-        '<div class="spacer"></div>' +
-        '<button class="btn primary" data-act="refreshRates">' + icoRate() + ' Refresh rates</button>' +
+        rateRows +
       '</div>' +
       (msg ? '<div class="' + (msg.type === 'ok' ? 'ok' : (msg.type === 'err' ? 'err' : 'rate-status')) + '">' + msg.text + '</div>' : '') +
 
-      '<div class="lbl" style="margin-top:22px;border-top:1px solid var(--line-2);padding-top:18px;">Override manually (optional)</div>' +
-      '<div class="desc" style="margin-top:6px;">Prefer to pin your own rate — e.g. a parallel-market rate? Set it here; it stays until you refresh.</div>' +
-      '<label class="field"><span class="lbl">₦ per 1 US Dollar</span>' +
-        '<input id="s-usd" type="number" inputmode="decimal" value="' + attr(r.USD) + '"></label>' +
-      '<label class="field"><span class="lbl">₦ per 1 Euro</span>' +
-        '<input id="s-eur" type="number" inputmode="decimal" value="' + attr(r.EUR) + '"></label>' +
-
-      '<div class="modal-actions">' +
-        '<div class="spacer"></div>' +
+      '<div class="modal-actions" style="margin-top:20px">' +
         '<button class="btn ghost" data-act="closeSettings">Close</button>' +
-        '<button class="btn primary" data-act="saveSettings">Save override</button>' +
+        '<div class="spacer"></div>' +
+        '<button class="btn primary" data-act="refreshRates">' + icoRate() + ' Refresh rates</button>' +
       '</div></div></div>';
   }
 
@@ -850,18 +889,32 @@
   }
   function currencyMarker(v) {
     var s = String(v == null ? '' : v).trim();
-    var m = s.match(/^\(?\s*(NGN|USD|EUR|naira|dollars?|euros?|₦|\$|€)\s*\)?$/i);
-    if (!m) return null;
-    return normCur(m[1]);
+    var m = s.match(/^\(?\s*(₦|\$|€|£|[A-Za-z]{3}|naira|dollars?|euros?|pounds?)\s*\)?$/);
+    return m ? normCur(m[1]) : null;
   }
-  function currencyInText(v) { var m = String(v == null ? '' : v).match(/\((NGN|USD|EUR|naira|dollars?|euros?)\)/i); return m ? normCur(m[1]) : null; }
-  function symbolCurrency(v) { var s = String(v == null ? '' : v); if (s.indexOf('₦') >= 0) return 'NGN'; if (s.indexOf('$') >= 0) return 'USD'; if (s.indexOf('€') >= 0) return 'EUR'; return null; }
-  function normCur(t) {
-    t = String(t).toUpperCase();
-    if (t === 'NGN' || t === 'NAIRA' || t === '₦') return 'NGN';
-    if (t === 'USD' || t === 'DOLLAR' || t === 'DOLLARS' || t === '$') return 'USD';
-    if (t === 'EUR' || t === 'EURO' || t === 'EUROS' || t === '€') return 'EUR';
+  function currencyInText(v) { var m = String(v == null ? '' : v).match(/\(\s*([A-Za-z]{3}|₦|\$|€|£)\s*\)/); return m ? normCur(m[1]) : null; }
+  function symbolCurrency(v) {
+    var s = String(v == null ? '' : v);
+    if (s.indexOf('₦') >= 0) return 'NGN'; if (s.indexOf('€') >= 0) return 'EUR';
+    if (s.indexOf('£') >= 0) return 'GBP'; if (s.indexOf('$') >= 0) return 'USD';
     return null;
+  }
+  function normCur(t) {
+    t = String(t).trim().toUpperCase();
+    if (t === '₦' || t === 'NAIRA') return 'NGN';
+    if (t === '$' || t === 'DOLLAR' || t === 'DOLLARS') return 'USD';
+    if (t === '€' || t === 'EURO' || t === 'EUROS') return 'EUR';
+    if (t === '£' || t === 'POUND' || t === 'POUNDS') return 'GBP';
+    if (CURRENCY_CODES.indexOf(t) >= 0) return t;
+    return null;
+  }
+  // Detect an ISO currency from a cell value (code, symbol, or name); else fallback.
+  function detectCurrency(str, fallback) {
+    var sym = symbolCurrency(str); if (sym) return sym;
+    var code = String(str || '').toUpperCase().replace(/[^A-Z]/g, '');
+    if (CURRENCY_CODES.indexOf(code) >= 0) return code;
+    var three = code.slice(0, 3); if (CURRENCY_CODES.indexOf(three) >= 0) return three;
+    return fallback;
   }
 
   function detectLedgerAnchors(aoa) {
@@ -987,7 +1040,7 @@
     var defType = '<div><div class="lbl">Default type</div><select data-def="type">' +
       ['expenses', 'income', 'savings'].map(function (s) { return '<option value="' + s + '"' + (d.defaultType === s ? ' selected' : '') + '>' + SECTIONS[s] + '</option>'; }).join('') + '</select></div>';
     var defCur = '<div><div class="lbl">Default currency</div><select data-def="currency">' +
-      CURS.map(function (c) { return '<option value="' + c + '"' + (d.defaultCurrency === c ? ' selected' : '') + '>' + NAME[c] + '</option>'; }).join('') + '</select></div>';
+      currencyOptions(d.defaultCurrency, true) + '</select></div>';
 
     // preview first 6 rows
     var prevHead = '<tr>' + d.headers.map(function (hName) { return '<th>' + esc(hName) + '</th>'; }).join('') + '</tr>';
@@ -1086,14 +1139,7 @@
       // negative amounts with a generic default lean toward expenses
       if (d.mapping.type < 0 && amt < 0 && d.defaultType !== 'income') section = 'expenses';
 
-      var currency = d.defaultCurrency;
-      if (d.mapping.currency >= 0) {
-        var cu = cellStr(r[d.mapping.currency]).toUpperCase().replace(/[^A-Z]/g, '');
-        if (cu.indexOf('USD') >= 0 || cu.indexOf('$') >= 0) currency = 'USD';
-        else if (cu.indexOf('EUR') >= 0) currency = 'EUR';
-        else if (cu.indexOf('NGN') >= 0 || cu.indexOf('NAIRA') >= 0) currency = 'NGN';
-        else if (CURS.indexOf(cu) >= 0) currency = cu;
-      }
+      var currency = d.mapping.currency >= 0 ? detectCurrency(cellStr(r[d.mapping.currency]), d.defaultCurrency) : d.defaultCurrency;
 
       var period = d.mapping.date >= 0 ? parsePeriod(r[d.mapping.date], fY, fM) : { y: fY, m: fM };
       var category = d.mapping.category >= 0 ? (cellStr(r[d.mapping.category]).trim() || autoCategory(name, section)) : autoCategory(name, section);
@@ -1107,6 +1153,126 @@
     persist();
     toast('Imported ' + added + ' row' + (added === 1 ? '' : 's') + (skipped ? ' · ' + skipped + ' skipped' : ''));
     render();
+  }
+
+  // =========================================================================
+  //  EXPORT  (statement of account: Excel via SheetJS, PDF via print)
+  // =========================================================================
+  function r2(n) { return Math.round(n * 100) / 100; }
+
+  // Gather a full statement for the selected year in the display currency.
+  function statementData() {
+    var year = state.year, disp = state.displayCurrency;
+    var yd = state.data[year] || {};
+    var rows = [], summary = [], totals = { income: 0, expense: 0 };
+    var secs = [['income', 'Income'], ['expenses', 'Expense'], ['savings', 'Saving']];
+    for (var m = 1; m <= 12; m++) {
+      var md = yd[m];
+      if (!md) continue;
+      var has = (md.income || []).length + (md.expenses || []).length + (md.savings || []).length;
+      if (!has) continue;
+      secs.forEach(function (s) {
+        (md[s[0]] || []).forEach(function (e) {
+          rows.push({ month: MONTHS[m - 1], type: s[1], name: e.name, category: e.category || '', amount: e.amount, currency: e.currency, conv: conv(e.amount, e.currency, disp) });
+        });
+      });
+      var inc = sumConv(md.income, disp), exp = sumConv(md.expenses, disp);
+      summary.push({ month: MONTHS[m - 1], income: inc, expense: exp, saved: inc - exp });
+      totals.income += inc; totals.expense += exp;
+    }
+    return { year: year, disp: disp, rows: rows, summary: summary, totals: totals };
+  }
+
+  function exportExcel() {
+    var d = statementData();
+    if (!d.rows.length) { toast('Nothing to export for ' + d.year); return; }
+    var wb = XLSX.utils.book_new();
+    var head = ['Month', 'Type', 'Name', 'Category', 'Amount', 'Currency', 'Amount (' + d.disp + ')'];
+    var aoa = [head].concat(d.rows.map(function (r) {
+      return [r.month, r.type, r.name, r.category, r2(r.amount), r.currency, r2(r.conv)];
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Statement');
+    var shead = ['Month', 'Income (' + d.disp + ')', 'Expenses (' + d.disp + ')', 'Saved (' + d.disp + ')'];
+    var saoa = [shead].concat(d.summary.map(function (s) { return [s.month, r2(s.income), r2(s.expense), r2(s.saved)]; }));
+    saoa.push(['Total', r2(d.totals.income), r2(d.totals.expense), r2(d.totals.income - d.totals.expense)]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(saoa), 'Summary');
+    XLSX.writeFile(wb, 'Ledger-Statement-' + d.year + '.xlsx');
+    state.exportOpen = false; toast('Excel statement downloaded'); render();
+  }
+
+  function buildStatementHtml() {
+    var d = statementData();
+    var h = fmt, disp = d.disp;
+    var who = (cloud.signedIn && cloud.user && cloud.user.email) ? esc(cloud.user.email) : '';
+    var generated = new Date().toLocaleString();
+    var css = 'body{font-family:-apple-system,Helvetica,Arial,sans-serif;color:#0e0f0c;margin:0;padding:40px;}'
+      + 'h1{font-size:22px;margin:0;letter-spacing:-0.02em;}'
+      + '.meta{color:#6f756e;font-size:12px;margin-top:6px;line-height:1.6;}'
+      + '.brand{display:flex;align-items:center;gap:10px;margin-bottom:18px;}'
+      + '.logo{width:30px;height:30px;border-radius:9px;background:#0e0f0c;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;}'
+      + 'h2{font-size:14px;margin:28px 0 8px;text-transform:uppercase;letter-spacing:0.08em;color:#8f9490;}'
+      + 'table{width:100%;border-collapse:collapse;font-size:12px;}'
+      + 'th{text-align:left;color:#8f9490;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;padding:7px 8px;border-bottom:1px solid #e6e9e2;}'
+      + 'td{padding:7px 8px;border-bottom:1px solid #f0f2ee;}'
+      + 'td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}'
+      + 'tfoot td{font-weight:800;border-top:2px solid #e6e9e2;border-bottom:none;}'
+      + '.tot{font-weight:800;}'
+      + '@media print{body{padding:0;} @page{margin:16mm;}}';
+    var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ledger Statement ' + d.year + '</title><style>' + css + '</style></head><body>';
+    html += '<div class="brand"><span class="logo">L</span><h1>Ledger — Statement of Account</h1></div>';
+    html += '<div class="meta"><strong>Period:</strong> ' + d.year + ' &nbsp;·&nbsp; <strong>Currency:</strong> ' + esc(curLabel(disp)) + (who ? ' &nbsp;·&nbsp; <strong>Account:</strong> ' + who : '') + '<br><strong>Generated:</strong> ' + esc(generated) + '</div>';
+
+    // Summary
+    html += '<h2>Summary</h2><table><thead><tr><th>Month</th><th class="n">Income</th><th class="n">Expenses</th><th class="n">Saved</th></tr></thead><tbody>';
+    d.summary.forEach(function (s) {
+      html += '<tr><td>' + s.month + '</td><td class="n">' + h(s.income, disp) + '</td><td class="n">' + h(s.expense, disp) + '</td><td class="n">' + fmtSigned(s.saved, disp) + '</td></tr>';
+    });
+    html += '</tbody><tfoot><tr><td>' + d.year + ' total</td><td class="n">' + h(d.totals.income, disp) + '</td><td class="n">' + h(d.totals.expense, disp) + '</td><td class="n">' + fmtSigned(d.totals.income - d.totals.expense, disp) + '</td></tr></tfoot></table>';
+
+    // Detailed entries grouped by month
+    html += '<h2>Detailed entries</h2><table><thead><tr><th>Month</th><th>Type</th><th>Name</th><th>Category</th><th class="n">Amount</th><th class="n">In ' + esc(disp) + '</th></tr></thead><tbody>';
+    d.rows.forEach(function (r) {
+      html += '<tr><td>' + esc(r.month) + '</td><td>' + esc(r.type) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.category) + '</td><td class="n">' + h(r.amount, r.currency) + '</td><td class="n">' + h(r.conv, disp) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div class="meta" style="margin-top:24px">Generated by Ledger · Savings shown as income − expenses.</div>';
+    html += '</body></html>';
+    return html;
+  }
+
+  function exportPdf() {
+    var d = statementData();
+    if (!d.rows.length) { toast('Nothing to export for ' + d.year); return; }
+    var iframe = document.createElement('iframe');
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(iframe);
+    var doc = iframe.contentWindow.document;
+    doc.open(); doc.write(buildStatementHtml()); doc.close();
+    var done = false;
+    var go = function () {
+      if (done) return; done = true;
+      try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) {}
+      setTimeout(function () { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); }, 1500);
+    };
+    iframe.onload = go;
+    setTimeout(go, 500); // fallback if onload doesn't fire after document.write
+    state.exportOpen = false; render();
+  }
+
+  function renderExportHtml() {
+    var d = statementData();
+    var n = d.rows.length;
+    return '<div class="overlay" data-act="closeExport"><div class="modal" data-stop="1">' +
+      '<div class="title">Export ' + d.year + ' statement</div>' +
+      '<div class="desc">A detailed statement of account for <strong>' + d.year + '</strong> — every income, expense and saving entry, plus monthly and yearly totals, in ' + esc(curLabel(d.disp)) + '. ' +
+        (n ? n + ' entries.' : 'No entries for this year yet.') + '</div>' +
+      '<div class="modal-actions" style="margin-top:22px;gap:12px;">' +
+        '<button class="btn ghost" data-act="closeExport">Cancel</button>' +
+        '<div class="spacer"></div>' +
+        '<button class="btn ghost" data-act="exportPdf"' + (n ? '' : ' disabled') + '>' + icoDownload() + ' PDF</button>' +
+        '<button class="btn primary" data-act="exportExcel"' + (n ? '' : ' disabled') + '>' + icoDownload() + ' Excel</button>' +
+      '</div></div></div>';
   }
 
   // =========================================================================
@@ -1179,17 +1345,6 @@
     toastTimer = setTimeout(function () { state.toast = null; render(); }, 2600);
   }
 
-  function saveSettings() {
-    var usd = document.getElementById('s-usd'), eur = document.getElementById('s-eur');
-    var u = parseFloat(usd && usd.value), e = parseFloat(eur && eur.value);
-    var next = { NGN: 1, USD: u > 0 ? u : state.rates.USD, EUR: e > 0 ? e : state.rates.EUR };
-    var changed = next.USD !== state.rates.USD || next.EUR !== state.rates.EUR;
-    state.rates = next;
-    if (changed) state.ratesMeta = { updated: new Date().toISOString(), source: 'manual' };
-    state.settingsOpen = false; state.ratesMsg = null;
-    persist(); render();
-  }
-
   // =========================================================================
   //  EVENT DELEGATION
   // =========================================================================
@@ -1199,7 +1354,6 @@
     var act = t.getAttribute('data-act');
 
     switch (act) {
-      case 'cur': state.displayCurrency = t.getAttribute('data-cur'); persist(); render(); break;
       case 'year': changeYear(parseInt(t.getAttribute('data-d'), 10)); break;
       case 'hide': state.hidden = !state.hidden; persist(); render(); break;
       case 'openMonth': state.view = 'month'; state.activeMonth = parseInt(t.getAttribute('data-mo'), 10); render(); break;
@@ -1210,7 +1364,6 @@
       case 'delDirect': delDirect(t.getAttribute('data-section'), t.getAttribute('data-id')); break;
       case 'saveModal': saveModal(); break;
       case 'deleteEntry': deleteFromModal(); break;
-      case 'mCur': snapshotModalInputs(); state.modal.currency = t.getAttribute('data-cur'); render(); break;
       case 'closeModal': if (isBackdrop(ev, t)) { state.modal = null; render(); } break;
 
       case 'applyRecurring': applyRecurring(state.year, state.activeMonth); break;
@@ -1220,8 +1373,12 @@
 
       case 'openSettings': state.settingsOpen = true; state.ratesMsg = null; render(); break;
       case 'closeSettings': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.settingsOpen = false; state.ratesMsg = null; render(); } break;
-      case 'saveSettings': saveSettings(); break;
       case 'refreshRates': fetchRates({}); break;
+
+      case 'openExport': state.exportOpen = true; render(); break;
+      case 'closeExport': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.exportOpen = false; render(); } break;
+      case 'exportExcel': exportExcel(); break;
+      case 'exportPdf': exportPdf(); break;
 
       case 'openImport': openImport(); break;
       case 'pickFile': openImport(); break;
@@ -1246,13 +1403,16 @@
       else if (state.recurringOpen) { state.recurringOpen = false; render(); }
       else if (state.importData) { state.importData = null; render(); }
       else if (state.accountOpen) { state.accountOpen = false; render(); }
+      else if (state.exportOpen) { state.exportOpen = false; render(); }
     }
   });
 
   // Keep open-form inputs mirrored into state so a background re-render (cloud
   // sync, rate refresh) can't wipe what the user has half-typed/picked.
   document.addEventListener('change', function (ev) {
+    if (ev.target.id === 'disp-cur') { state.displayCurrency = ev.target.value; persist(); render(); return; }
     if (state.modal) {
+      if (ev.target.id === 'm-currency') { state.modal.currency = ev.target.value; return; }
       if (ev.target.id === 'm-category') { state.modal.category = ev.target.value; state.modal.categoryTouched = true; }
       else if (ev.target.id === 'm-recur') state.modal.recurring = ev.target.checked;
     }
@@ -1299,6 +1459,7 @@
   function icoRepeatSm() { return '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>'; }
   function icoUpload() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'; }
   function icoRate() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l-3-3"/><path d="M21 17H8l3 3"/></svg>'; }
+  function icoDownload() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'; }
   function icoGoogle() { return '<svg width="15" height="15" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>'; }
 
   // =========================================================================

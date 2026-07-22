@@ -61,6 +61,8 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
   .header { gap: 14px; padding: 18px 18px 14px; }
   .header .account { order: 1; margin-left: auto; }
   .header .grp-currency { order: 2; flex-basis: 100%; margin-left: 0; justify-content: space-between; flex-wrap: nowrap; }
+  .header .grp-currency .cur-wrap { flex: 1; min-width: 0; margin-right: 12px; }
+  .header .grp-currency .cur-select { max-width: 100%; width: 100%; }
   .header .grp-actions { order: 3; flex-basis: 100%; justify-content: flex-start; gap: 12px; }
   .header .account-btn { background: #e4e7e2; padding: 4px; border-radius: 12px; gap: 0; }
   .header .account-btn .account-name { display: none; }
@@ -76,6 +78,21 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
   transition: all .15s; white-space: nowrap;
 }
 .seg.active { background: var(--ink); color: #fff; }
+
+/* Currency dropdown (native select styled as a pill) */
+.cur-wrap { position: relative; display: inline-flex; }
+.cur-select {
+  appearance: none; -webkit-appearance: none;
+  background: var(--chip); color: var(--ink); border: none; border-radius: 999px;
+  padding: 8px 34px 8px 16px; font: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer; max-width: 190px; text-overflow: ellipsis; white-space: nowrap;
+}
+.cur-select:hover { background: var(--chip-hover); }
+.cur-wrap::after {
+  content: ''; position: absolute; right: 15px; top: calc(50% - 5px);
+  width: 7px; height: 7px; border-right: 2px solid #8f9490; border-bottom: 2px solid #8f9490;
+  transform: rotate(45deg); pointer-events: none;
+}
 
 .yearnav { display: inline-flex; align-items: center; gap: 2px; background: var(--chip); border-radius: 999px; padding: 3px; }
 .yearnav button {
@@ -247,6 +264,8 @@ table.months tfoot td { border-top: 2px solid #e6e9e2; font-weight: 800; }
 .btn.primary:hover { background: #2a2c27; }
 .btn.danger-text { background: transparent; color: var(--accent-warn); padding: 11px 4px; }
 .btn.link { background: transparent; color: var(--ink-soft); padding: 11px 4px; text-decoration: underline; }
+.btn svg { vertical-align: -2px; margin-right: 4px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* rates status line */
 .rate-status { margin-top: 14px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
