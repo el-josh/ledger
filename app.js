@@ -1216,14 +1216,24 @@
     }
   });
 
-  // Mark the category as user-chosen so it isn't overwritten by auto-detection.
+  // Keep open-form inputs mirrored into state so a background re-render (cloud
+  // sync, rate refresh) can't wipe what the user has half-typed/picked.
   document.addEventListener('change', function (ev) {
-    if (ev.target.id === 'm-category' && state.modal) state.modal.categoryTouched = true;
+    if (state.modal) {
+      if (ev.target.id === 'm-category') { state.modal.category = ev.target.value; state.modal.categoryTouched = true; }
+      else if (ev.target.id === 'm-recur') state.modal.recurring = ev.target.checked;
+    }
+    if (state.importData && state.importData.mode === 'table' &&
+        (ev.target.matches('[data-map]') || ev.target.matches('[data-def]'))) {
+      readImportControls();
+    }
   });
 
-  // Live thousands-separator formatting in the amount field.
   document.addEventListener('input', function (ev) {
-    if (ev.target && ev.target.id === 'm-amount') onAmountInput(ev.target);
+    if (!ev.target) return;
+    if (ev.target.id === 'm-amount') { onAmountInput(ev.target); if (state.modal) state.modal.amount = ev.target.value; }
+    else if (ev.target.id === 'm-name' && state.modal) state.modal.name = ev.target.value;
+    else if (ev.target.id === 'ledger-year' && state.importData) state.importData.year = ev.target.value;
   });
 
   document.getElementById('fileInput').addEventListener('change', function (ev) {
