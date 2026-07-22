@@ -201,10 +201,11 @@ table.months tfoot td { border-top: 2px solid #e6e9e2; font-weight: 800; }
 .bucket-head .v { font-weight: 700; font-size: 15px; }
 
 .entry { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 0; border-top: 1px solid var(--line-2); }
-.entry .main { flex: 1; text-align: left; border: none; background: transparent; color: var(--ink); font: inherit; cursor: pointer; padding: 0; min-width: 0; }
-.entry .main .nm { font-size: 14.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.entry .main { flex: 1 1 auto; text-align: left; border: none; background: transparent; color: var(--ink); font: inherit; cursor: pointer; padding: 0; min-width: 0; }
+.entry .main .nm { font-size: 14.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.entry .main .nm-text { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .entry .main .conv { font-size: 12px; color: var(--muted-2); margin-top: 2px; }
-.entry .right { display: flex; align-items: center; gap: 8px; }
+.entry .right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .entry .right .amt { font-size: 14.5px; font-weight: 600; white-space: nowrap; }
 .tag { font-size: 10px; letter-spacing: 0.05em; color: var(--muted); background: var(--line-2); border-radius: 6px; padding: 2px 6px; font-weight: 600; white-space: nowrap; }
 .tag.cat { background: #eef2ea; color: #5b6b52; }

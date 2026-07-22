@@ -679,7 +679,7 @@
       var isConv = e.currency !== disp;
       html += '<div class="entry">' +
         '<button class="main" data-act="edit" data-section="savings" data-id="' + attr(e.id) + '">' +
-          '<div class="nm">' + esc(e.name) +
+          '<div class="nm"><span class="nm-text">' + esc(e.name) + '</span>' +
             (e.category ? '<span class="tag cat">' + esc(e.category) + '</span>' : '') +
             (e.recurring ? '<span class="tag recur">' + icoRepeatSm() + 'Monthly</span>' : '') +
           '</div>' +
@@ -717,7 +717,7 @@
       var isConv = e.currency !== disp;
       html += '<div class="entry">' +
         '<button class="main" data-act="edit" data-section="' + section + '" data-id="' + attr(e.id) + '">' +
-          '<div class="nm">' + esc(e.name) +
+          '<div class="nm"><span class="nm-text">' + esc(e.name) + '</span>' +
             (e.category ? '<span class="tag cat">' + esc(e.category) + '</span>' : '') +
             (e.recurring ? '<span class="tag recur">' + icoRepeatSm() + 'Monthly</span>' : '') +
           '</div>' +
@@ -799,7 +799,7 @@
       sorted.forEach(function (t) {
         html += '<div class="entry">' +
           '<div class="main" style="cursor:default">' +
-            '<div class="nm">' + esc(t.name) +
+            '<div class="nm"><span class="nm-text">' + esc(t.name) + '</span>' +
               '<span class="tag cat">' + esc(t.category || SECTIONS[t.section]) + '</span>' +
               '<span class="tag">' + SECTIONS[t.section] + '</span>' +
             '</div></div>' +
