@@ -244,6 +244,13 @@ table.months tfoot td { border-top: 2px solid #e6e9e2; font-weight: 800; }
   width: 100%; margin-top: 8px; padding: 13px 15px; border: 1px solid var(--field-line);
   border-radius: 13px; background: var(--field); font-size: 16px; color: var(--ink); outline: none;
 }
+/* Custom chevron with breathing room from the border (native arrow hugs it). */
+.field select {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  padding-right: 42px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238f9490' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat; background-position: right 16px center;
+}
 .field input:focus, .field select:focus { border-color: #b7bdb2; }
 .segset.full { width: 100%; margin-top: 8px; }
 .segset.full .seg { flex: 1; padding: 9px 12px; }

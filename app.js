@@ -34,7 +34,17 @@
   var SECTIONS = { income: 'income', expenses: 'expense', savings: 'saving' };
   var KEY = 'pft-ledger-v3';
 
-  var CATEGORIES = ['Salary','Groceries','Housing','Utilities','Transport','Health','Family','Education','Entertainment','Shopping','Savings','Other'];
+  // Category options per section.
+  var CATEGORIES_BY_SECTION = {
+    income: ['Salary', 'Freelance', 'Sales', 'Gift'],
+    expenses: ['Groceries', 'Housing', 'Utilities', 'Transport', 'Health', 'Family', 'Education', 'Entertainment', 'Shopping', 'Miscellaneous', 'Other'],
+    savings: ['Savings', 'Investment']
+  };
+  function categoriesFor(section, current) {
+    var list = (CATEGORIES_BY_SECTION[section] || CATEGORIES_BY_SECTION.expenses).slice();
+    if (current && list.indexOf(current) < 0) list.unshift(current); // keep an existing custom value
+    return list;
+  }
   // Keyword hints, evaluated in order — first match wins.
   var CAT_HINTS = [
     ['Salary',        ['salary','wage','payroll','stipend','balance','caldera','perchfit','dividend','interest','refund']],
@@ -174,9 +184,11 @@
   function autoCategory(name, section) {
     if (section === 'income') return 'Salary';
     if (section === 'savings') return 'Savings';
+    var allowed = CATEGORIES_BY_SECTION.expenses;
     var n = ' ' + String(name || '').toLowerCase() + ' ';
     for (var i = 0; i < CAT_HINTS.length; i++) {
       var cat = CAT_HINTS[i][0], words = CAT_HINTS[i][1];
+      if (allowed.indexOf(cat) < 0) continue; // skip categories not valid for expenses
       for (var j = 0; j < words.length; j++) { if (n.indexOf(words[j]) !== -1) return cat; }
     }
     return 'Other';
@@ -726,7 +738,7 @@
   function renderModal() {
     var m = state.modal;
     var title = (m.mode === 'edit' ? 'Edit ' : 'Add ') + SECTIONS[m.section];
-    var catOpts = CATEGORIES.map(function (c) { return '<option value="' + attr(c) + '"' + (m.category === c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
+    var catOpts = categoriesFor(m.section, m.category).map(function (c) { return '<option value="' + attr(c) + '"' + (m.category === c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
     return '<div class="overlay" data-act="closeModal"><div class="modal" data-stop="1">' +
       '<div class="title">' + esc(title) + '</div>' +
       '<label class="field"><span class="lbl">Name</span>' +
