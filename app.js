@@ -311,6 +311,7 @@
   }
 
   function onAuthChanged(user) {
+    var wasSignedIn = cloud.signedIn;
     if (cloud.unsub) { cloud.unsub(); cloud.unsub = null; }
     if (user) {
       cloud.signedIn = true;
@@ -319,6 +320,16 @@
       subscribeDoc(user.uid);
     } else {
       cloud.signedIn = false; cloud.user = null; cloud.docRef = null; cloud.status = '';
+      // On an actual sign-out (not the initial "no session" on load), clear the
+      // signed-out account's data from this device. It stays safe in the cloud
+      // and returns on next sign-in. This runs AFTER signedIn=false so the empty
+      // state is never pushed back up to Firestore.
+      if (wasSignedIn) {
+        assignPersisted({});
+        state.view = 'dashboard'; state.activeMonth = null;
+        state.modal = null; state.importData = null;
+        state.settingsOpen = false; state.recurringOpen = false;
+      }
     }
     render();
   }
