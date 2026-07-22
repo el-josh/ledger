@@ -94,6 +94,30 @@
     return (SYM[cur] || '') + new Intl.NumberFormat('en-US', opts).format(a);
   }
   function fmtSigned(a, cur) { var s = a < -0.005 ? '−' : ''; return s + fmt(Math.abs(a), cur); }
+  // Group an amount string's integer part with thousands commas as it's typed.
+  function groupThousands(raw) {
+    var s = String(raw == null ? '' : raw).replace(/[^0-9.]/g, '');
+    if (s === '') return '';
+    var firstDot = s.indexOf('.');
+    if (firstDot !== -1) s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, '');
+    var parts = s.split('.');
+    var intPart = parts[0].replace(/^0+(?=\d)/, '');
+    if (intPart === '') intPart = '0';
+    var grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts.length > 1 ? grouped + '.' + parts[1].slice(0, 2) : grouped;
+  }
+  function unformatAmount(raw) { return parseFloat(String(raw == null ? '' : raw).replace(/,/g, '')); }
+  // Reformat the amount field in place, keeping the caret near where it was.
+  function onAmountInput(el) {
+    var before = el.value.slice(0, el.selectionStart);
+    var digitsBefore = (before.match(/[0-9]/g) || []).length;
+    var formatted = groupThousands(el.value);
+    el.value = formatted;
+    var pos = 0, seen = 0;
+    while (pos < formatted.length && seen < digitsBefore) { if (/[0-9]/.test(formatted[pos])) seen++; pos++; }
+    if (formatted[pos] === '.') pos++;
+    try { el.setSelectionRange(pos, pos); } catch (e) {}
+  }
   function sumConv(list, to) { return (list || []).reduce(function (s, e) { return s + conv(e.amount, e.currency, to); }, 0); }
   function addNative(o, list) { (list || []).forEach(function (e) { o[e.currency] = (o[e.currency] || 0) + e.amount; }); }
   function showNat(o, disp) { var ks = CURS.filter(function (c) { return o[c] > 0; }); return ks.length > 1 || (ks.length === 1 && ks[0] !== disp); }
@@ -445,7 +469,7 @@
       '<label class="field"><span class="lbl">Name</span>' +
         '<input id="m-name" value="' + attr(m.name) + '" placeholder="e.g. NW Salary" autocomplete="off"></label>' +
       '<label class="field"><span class="lbl">Amount</span>' +
-        '<input id="m-amount" type="number" inputmode="decimal" value="' + attr(m.amount) + '" placeholder="0"></label>' +
+        '<input id="m-amount" type="text" inputmode="decimal" autocomplete="off" value="' + attr(groupThousands(m.amount)) + '" placeholder="0"></label>' +
       '<label class="field"><span class="lbl">Category</span><select id="m-category">' + catOpts + '</select></label>' +
       '<div class="field"><span class="lbl">Currency</span><div class="segset full">' + seg('NGN') + seg('USD') + seg('EUR') + '</div></div>' +
       '<label class="checkrow"><input id="m-recur" type="checkbox"' + (m.recurring ? ' checked' : '') + '>' +
@@ -907,7 +931,7 @@
     snapshotModalInputs();
     var m = state.modal; if (!m) return;
     var name = (m.name || '').trim();
-    var amt = parseFloat(m.amount);
+    var amt = unformatAmount(m.amount);
     if (!name || !(amt > 0)) { m.error = true; render(); return; }
     // If the user never manually chose a category, derive it from the name.
     var category = m.categoryTouched ? (m.category || autoCategory(name, m.section)) : autoCategory(name, m.section);
@@ -1021,6 +1045,11 @@
   // Mark the category as user-chosen so it isn't overwritten by auto-detection.
   document.addEventListener('change', function (ev) {
     if (ev.target.id === 'm-category' && state.modal) state.modal.categoryTouched = true;
+  });
+
+  // Live thousands-separator formatting in the amount field.
+  document.addEventListener('input', function (ev) {
+    if (ev.target && ev.target.id === 'm-amount') onAmountInput(ev.target);
   });
 
   document.getElementById('fileInput').addEventListener('change', function (ev) {
