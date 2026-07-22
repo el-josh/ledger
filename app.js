@@ -394,17 +394,19 @@
     return '' +
       '<header class="header">' +
         '<div class="brand"><span class="logo">L</span><span class="name">Ledger</span></div>' +
-        '<div class="tools">' +
+        '<div class="account">' + authControl() + '</div>' +
+        '<div class="grp grp-currency">' +
           '<div class="segset">' + curBtn('NGN') + curBtn('USD') + curBtn('EUR') + '</div>' +
           '<div class="yearnav">' +
             '<button data-act="year" data-d="-1">‹</button>' +
             '<span class="label">' + state.year + '</span>' +
             '<button data-act="year" data-d="1">›</button>' +
           '</div>' +
+        '</div>' +
+        '<div class="grp grp-actions">' +
           '<button class="pill" data-act="openRecurring" title="Recurring items">' + icoRepeat() + 'Recurring</button>' +
           '<button class="pill" data-act="openImport" title="Import a spreadsheet">' + icoUpload() + 'Import</button>' +
           '<button class="pill" data-act="openSettings">' + icoRate() + 'Rates</button>' +
-          authControl() +
         '</div>' +
       '</header>';
   }
@@ -416,9 +418,9 @@
       var av = u.photo
         ? '<img class="avatar" src="' + attr(u.photo) + '" alt="" referrerpolicy="no-referrer">'
         : '<span class="avatar avatar-fallback">' + esc(initialOf(u)) + '</span>';
-      return '<button class="pill" data-act="openAccount" title="Account & sync">' + av + esc(firstNameOf(u)) + '</button>';
+      return '<button class="pill account-btn" data-act="openAccount" title="Account & sync">' + av + '<span class="account-name">' + esc(firstNameOf(u)) + '</span></button>';
     }
-    return '<button class="pill" data-act="signIn" title="Sign in to sync across devices">' + icoGoogle() + 'Sign in</button>';
+    return '<button class="pill account-btn" data-act="signIn" title="Sign in to sync across devices">' + icoGoogle() + '<span class="account-name">Sign in</span></button>';
   }
 
   function renderAccountHtml() {
