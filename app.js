@@ -10,9 +10,9 @@
   'use strict';
 
   // ---- constants ----------------------------------------------------------
-  // Currencies the picker offers. PINNED show first; the rest are ISO 4217.
+  // Currencies the picker offers (the supported, reliably-converting set).
   var PINNED = ['NGN', 'USD', 'GBP', 'EUR', 'CAD'];
-  var CURRENCY_CODES = ['NGN','USD','GBP','EUR','CAD','AED','AFN','ALL','AMD','ANG','AOA','ARS','AUD','AWG','AZN','BAM','BBD','BDT','BGN','BHD','BIF','BMD','BND','BOB','BRL','BSD','BTN','BWP','BYN','BZD','CDF','CHF','CLP','CNY','COP','CRC','CUP','CVE','CZK','DJF','DKK','DOP','DZD','EGP','ERN','ETB','FJD','FKP','GEL','GHS','GIP','GMD','GNF','GTQ','GYD','HKD','HNL','HRK','HTG','HUF','IDR','ILS','INR','IQD','IRR','ISK','JMD','JOD','JPY','KES','KGS','KHR','KMF','KRW','KWD','KYD','KZT','LAK','LBP','LKR','LRD','LSL','LYD','MAD','MDL','MGA','MKD','MMK','MNT','MOP','MRU','MUR','MVR','MWK','MXN','MYR','MZN','NAD','NIO','NOK','NPR','NZD','OMR','PAB','PEN','PGK','PHP','PKR','PLN','PYG','QAR','RON','RSD','RUB','RWF','SAR','SBD','SCR','SDG','SEK','SGD','SHP','SLE','SOS','SRD','SSP','STN','SVC','SYP','SZL','THB','TJS','TMT','TND','TOP','TRY','TTD','TWD','TZS','UAH','UGX','UYU','UZS','VES','VND','VUV','WST','XAF','XCD','XOF','XPF','YER','ZAR','ZMW','ZWL'];
+  var CURRENCY_CODES = ['NGN', 'USD', 'GBP', 'EUR', 'CAD'];
   var _curNames = (function () { try { return new Intl.DisplayNames(['en'], { type: 'currency' }); } catch (e) { return null; } })();
   var _nameCache = {}, _symCache = {};
   function curName(c) {
@@ -456,16 +456,12 @@
     persist();
   }
 
-  // Currency <option>s: pinned currencies first, then all others by name.
+  // Currency <option>s for the supported set.
   function currencyOptions(selected, withNames) {
-    var opt = function (c) {
+    return CURRENCY_CODES.map(function (c) {
       var label = withNames ? (curLabel(c) + ' — ' + curName(c)) : curLabel(c);
       return '<option value="' + c + '"' + (c === selected ? ' selected' : '') + '>' + esc(label) + '</option>';
-    };
-    var rest = CURRENCY_CODES.filter(function (c) { return PINNED.indexOf(c) < 0; })
-      .sort(function (a, b) { return curName(a).localeCompare(curName(b)); });
-    return '<optgroup label="Common">' + PINNED.map(opt).join('') + '</optgroup>' +
-           '<optgroup label="All currencies">' + rest.map(opt).join('') + '</optgroup>';
+    }).join('');
   }
 
   function renderHeader() {
