@@ -21,23 +21,25 @@ python3 -m http.server 8000   # then visit http://localhost:8000
 
 ## Features
 
-### Multi-currency with live Wise rates
+### Multi-currency with automatic live rates
 Toggle the display currency (₦ NGN / $ USD / € EUR) in the header. Each entry
 keeps its own original currency; totals are converted on the fly.
 
-Open **Rates** to manage conversion rates:
+Rates are fetched **automatically — no API key, token or sign-up required.** On
+load (and whenever you press **Rates → Refresh rates**) the app pulls live
+mid-market rates from a keyless, CORS-enabled source:
 
-- **Live rates from Wise** — paste a Wise API token and press *Fetch live
-  rates*. The app calls the Wise rate endpoint
-  (`GET https://api.wise.com/v1/rates?source=USD&target=NGN`, with
-  `Authorization: Bearer <token>`) for USD→NGN and EUR→NGN. If a token is
-  present, rates auto-refresh on load when they're more than 12 hours old.
-- **Manual override** — set the Naira value of $1 and €1 by hand. Used as a
-  fallback whenever a live fetch isn't available.
+1. [ExchangeRate-API open endpoint](https://open.er-api.com) —
+   `GET https://open.er-api.com/v6/latest/NGN` (primary)
+2. [@fawazahmed0 currency-api](https://github.com/fawazahmed0/exchange-api) on
+   the jsDelivr CDN (automatic fallback if the first is unreachable)
 
-> Get a token from your Wise account (Settings → API tokens). Because Ledger is
-> a purely client-side app, a browser may block the cross-origin Wise request
-> (CORS); if that happens the app tells you and manual rates keep working.
+Rates refresh silently on load when the saved ones are more than 12 hours old.
+If you're offline, the last saved rates are kept.
+
+- **Manual override (optional)** — under **Rates** you can still pin your own
+  Naira value for $1 / €1 (handy for a parallel-market rate). It stays until you
+  refresh. You never *have* to set anything manually.
 
 ### Automatic savings
 Savings is the money you don't spend. For each month, **Saved = Income −
@@ -86,5 +88,6 @@ Category) and shows a preview. Adjust the column mapping if needed and import.
 
 ## Data & privacy
 Everything stays in your browser's `localStorage` under the key
-`pft-ledger-v3`. Nothing is sent anywhere except the optional, token-authorized
-call to Wise for exchange rates.
+`pft-ledger-v3`. The only outbound request is an anonymous, keyless call to a
+public exchange-rate service to refresh conversion rates; no personal or
+financial data leaves your browser.

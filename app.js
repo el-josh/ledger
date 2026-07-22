@@ -187,45 +187,59 @@
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
-  // ---- Wise exchange-rate API --------------------------------------------
-  // Wise "Get rate" endpoint: GET https://api.wise.com/v1/rates?source=USD&target=NGN
-  // Header: Authorization: Bearer <API token>. Response: [{ "rate": 1600.5, ... }].
-  function fetchWiseRates() {
-    var token = (state.wiseToken || '').trim();
-    if (!token) { state.ratesMsg = { type: 'err', text: 'Enter your Wise API token first, then fetch.' }; renderSettings(); return; }
-    state.ratesMsg = { type: 'info', text: 'Fetching live rates from Wise…' };
-    renderSettings();
-
-    var wanted = ['USD', 'EUR'];
-    Promise.all(wanted.map(function (cur) {
-      return fetch('https://api.wise.com/v1/rates?source=' + cur + '&target=NGN', {
-        headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }
-      }).then(function (res) {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.json();
-      }).then(function (json) {
-        var rate = Array.isArray(json) ? (json[0] && json[0].rate) : (json && json.rate);
-        if (!(rate > 0)) throw new Error('No rate returned for ' + cur);
-        return [cur, rate];
-      });
-    })).then(function (pairs) {
-      var next = { NGN: 1 };
-      pairs.forEach(function (p) { next[p[0]] = p[1]; });
-      state.rates = next;
-      state.ratesMeta = { updated: new Date().toISOString(), source: 'wise' };
-      state.ratesMsg = { type: 'ok', text: 'Live rates updated from Wise.' };
-      persist();
-      renderSettings();
-    }).catch(function (err) {
-      state.ratesMsg = { type: 'err', text: 'Could not reach Wise (' + esc(err.message) + '). Check the token, or your browser may block the request (CORS) — you can still set rates manually below.' };
-      renderSettings();
+  // ---- live exchange rates (keyless) -------------------------------------
+  // Rates are quoted as "Naira per 1 unit". Two free, no-key, CORS-enabled
+  // sources are tried in turn:
+  //   1. ExchangeRate-API open endpoint  https://open.er-api.com/v6/latest/NGN
+  //   2. @fawazahmed0 currency-api (jsDelivr CDN) as a fallback
+  // Both return how much of each currency 1 NGN buys, so we invert to get the
+  // Naira value of 1 USD / 1 EUR.
+  function fetchErApi() {
+    return fetch('https://open.er-api.com/v6/latest/NGN').then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();
+    }).then(function (j) {
+      if (j.result && j.result !== 'success') throw new Error('provider error');
+      var rt = j.rates || {};
+      if (!(rt.USD > 0) || !(rt.EUR > 0)) throw new Error('missing rates');
+      return { usd: 1 / rt.USD, eur: 1 / rt.EUR, provider: 'ExchangeRate-API' };
+    });
+  }
+  function fetchFawaz() {
+    var urls = [
+      'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/ngn.min.json',
+      'https://latest.currency-api.pages.dev/v1/currencies/ngn.min.json'
+    ];
+    return fetch(urls[0]).catch(function () { return fetch(urls[1]); }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();
+    }).then(function (j) {
+      var n = j.ngn || {};
+      if (!(n.usd > 0) || !(n.eur > 0)) throw new Error('missing rates');
+      return { usd: 1 / n.usd, eur: 1 / n.eur, provider: 'Currency-API' };
     });
   }
 
-  function maybeAutoFetchRates() {
-    if (!state.wiseToken) return;
+  function fetchRates(opts) {
+    opts = opts || {};
+    if (!opts.silent) { state.ratesMsg = { type: 'info', text: 'Fetching latest rates…' }; if (state.settingsOpen) render(); }
+    fetchErApi().catch(function () { return fetchFawaz(); }).then(function (res) {
+      state.rates = { NGN: 1, USD: res.usd, EUR: res.eur };
+      state.ratesMeta = { updated: new Date().toISOString(), source: 'live', provider: res.provider };
+      state.ratesMsg = { type: 'ok', text: 'Updated from ' + res.provider + '.' };
+      persist();
+      render();
+    }).catch(function (err) {
+      if (!opts.silent) {
+        state.ratesMsg = { type: 'err', text: 'Could not fetch live rates (' + esc(err.message || 'offline') + '). Showing the last saved rates.' };
+        if (state.settingsOpen) render();
+      }
+    });
+  }
+
+  function autoFetchRates() {
     var last = state.ratesMeta && state.ratesMeta.updated ? Date.parse(state.ratesMeta.updated) : 0;
-    if (Date.now() - last > 12 * 3600 * 1000) { fetchWiseRates(); }
+    // Refresh silently on load unless we already have live rates from the last 12h.
+    if (state.ratesMeta && state.ratesMeta.source === 'live' && (Date.now() - last) < 12 * 3600 * 1000) return;
+    fetchRates({ silent: true });
   }
 
   // =========================================================================
@@ -487,11 +501,11 @@
   function renderSettingsHtml() {
     var r = state.rates, meta = state.ratesMeta || {};
     var updated = meta.updated ? new Date(meta.updated).toLocaleString() : 'never';
-    var srcLabel = meta.source === 'wise' ? 'Wise live rates' : 'Manual';
+    var srcLabel = meta.source === 'live' ? ('Live · ' + (meta.provider || 'auto')) : (meta.source === 'manual' ? 'Manual override' : 'Default');
     var msg = state.ratesMsg;
     return '<div class="overlay" data-act="closeSettings"><div class="modal" data-stop="1">' +
       '<div class="title">Exchange rates</div>' +
-      '<div class="desc">Rates are quoted as Naira per 1 unit. Fetch live rates from Wise, or set them manually. Entries keep their original currency — this only affects converted totals.</div>' +
+      '<div class="desc">Live mid-market rates (Naira per 1 unit), fetched automatically — no API key or sign-up needed. Entries keep their original currency; this only affects converted totals.</div>' +
 
       '<div class="rate-status">' +
         '<div class="rate-row"><span>Source</span><strong>' + esc(srcLabel) + '</strong></div>' +
@@ -499,24 +513,23 @@
         '<div class="rate-row"><span>₦ / $ USD</span><strong>' + fmt(r.USD, 'NGN') + '</strong></div>' +
         '<div class="rate-row"><span>₦ / € EUR</span><strong>' + fmt(r.EUR, 'NGN') + '</strong></div>' +
       '</div>' +
-
-      '<label class="field"><span class="lbl">Wise API token</span>' +
-        '<input id="s-token" type="password" value="' + attr(state.wiseToken) + '" placeholder="Bearer token from wise.com" autocomplete="off"></label>' +
-      '<div class="modal-actions" style="margin-top:12px">' +
+      '<div class="modal-actions" style="margin-top:14px">' +
         '<div class="spacer"></div>' +
-        '<button class="btn primary" data-act="fetchWise">' + icoRate() + ' Fetch live rates</button>' +
+        '<button class="btn primary" data-act="refreshRates">' + icoRate() + ' Refresh rates</button>' +
       '</div>' +
       (msg ? '<div class="' + (msg.type === 'ok' ? 'ok' : (msg.type === 'err' ? 'err' : 'rate-status')) + '">' + msg.text + '</div>' : '') +
 
-      '<label class="field"><span class="lbl">₦ per 1 US Dollar (manual)</span>' +
+      '<div class="lbl" style="margin-top:22px;border-top:1px solid var(--line-2);padding-top:18px;">Override manually (optional)</div>' +
+      '<div class="desc" style="margin-top:6px;">Prefer to pin your own rate — e.g. a parallel-market rate? Set it here; it stays until you refresh.</div>' +
+      '<label class="field"><span class="lbl">₦ per 1 US Dollar</span>' +
         '<input id="s-usd" type="number" inputmode="decimal" value="' + attr(r.USD) + '"></label>' +
-      '<label class="field"><span class="lbl">₦ per 1 Euro (manual)</span>' +
+      '<label class="field"><span class="lbl">₦ per 1 Euro</span>' +
         '<input id="s-eur" type="number" inputmode="decimal" value="' + attr(r.EUR) + '"></label>' +
 
       '<div class="modal-actions">' +
         '<div class="spacer"></div>' +
         '<button class="btn ghost" data-act="closeSettings">Close</button>' +
-        '<button class="btn primary" data-act="saveSettings">Save rates</button>' +
+        '<button class="btn primary" data-act="saveSettings">Save override</button>' +
       '</div></div></div>';
   }
 
@@ -972,22 +985,16 @@
     toastTimer = setTimeout(function () { state.toast = null; render(); }, 2600);
   }
 
-  // settings helpers that re-render only the overlay area (full render is fine here)
-  function renderSettings() { render(); }
-
   function saveSettings() {
-    var usd = document.getElementById('s-usd'), eur = document.getElementById('s-eur'), tok = document.getElementById('s-token');
+    var usd = document.getElementById('s-usd'), eur = document.getElementById('s-eur');
     var u = parseFloat(usd && usd.value), e = parseFloat(eur && eur.value);
     var next = { NGN: 1, USD: u > 0 ? u : state.rates.USD, EUR: e > 0 ? e : state.rates.EUR };
     var changed = next.USD !== state.rates.USD || next.EUR !== state.rates.EUR;
     state.rates = next;
-    if (tok) state.wiseToken = tok.value.trim();
     if (changed) state.ratesMeta = { updated: new Date().toISOString(), source: 'manual' };
     state.settingsOpen = false; state.ratesMsg = null;
     persist(); render();
   }
-
-  function captureToken() { var tok = document.getElementById('s-token'); if (tok) state.wiseToken = tok.value.trim(); }
 
   // =========================================================================
   //  EVENT DELEGATION
@@ -1020,7 +1027,7 @@
       case 'openSettings': state.settingsOpen = true; state.ratesMsg = null; render(); break;
       case 'closeSettings': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.settingsOpen = false; state.ratesMsg = null; render(); } break;
       case 'saveSettings': saveSettings(); break;
-      case 'fetchWise': captureToken(); fetchWiseRates(); break;
+      case 'refreshRates': fetchRates({}); break;
 
       case 'openImport': openImport(); break;
       case 'pickFile': openImport(); break;
@@ -1087,5 +1094,5 @@
   //  BOOT
   // =========================================================================
   render();
-  maybeAutoFetchRates();
+  autoFetchRates();
 })();
