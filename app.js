@@ -95,7 +95,7 @@
   }
   function persist() {
     try { localStorage.setItem(KEY, JSON.stringify(persistedPayload())); } catch (e) {}
-    if (cloud.signedIn && !cloud.applyingRemote) scheduleCloudSave(false);
+    if (cloud.signedIn && !cloud.applyingRemote && !cloud.hydrating) scheduleCloudSave(false);
   }
 
   function genId() { return 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
@@ -261,7 +261,10 @@
   var cloud = {
     configured: false, ready: false, signedIn: false, user: null,
     status: '', error: '', authMod: null, fs: null, auth: null, db: null,
-    docRef: null, unsub: null, saveTimer: null, applyingRemote: false
+    docRef: null, unsub: null, saveTimer: null, applyingRemote: false,
+    // True between sign-in and the first cloud snapshot: never push local up
+    // during this window, or an empty/stale local state could clobber the cloud.
+    hydrating: false
   };
 
   function initCloud() {
@@ -313,13 +316,15 @@
   function onAuthChanged(user) {
     var wasSignedIn = cloud.signedIn;
     if (cloud.unsub) { cloud.unsub(); cloud.unsub = null; }
+    if (cloud.saveTimer) { clearTimeout(cloud.saveTimer); cloud.saveTimer = null; }
     if (user) {
       cloud.signedIn = true;
+      cloud.hydrating = true; // wait for the first snapshot before pushing anything
       cloud.user = { name: user.displayName, email: user.email, photo: user.photoURL, uid: user.uid };
       cloud.status = 'Connecting…'; cloud.error = '';
       subscribeDoc(user.uid);
     } else {
-      cloud.signedIn = false; cloud.user = null; cloud.docRef = null; cloud.status = '';
+      cloud.signedIn = false; cloud.hydrating = false; cloud.user = null; cloud.docRef = null; cloud.status = '';
       // On an actual sign-out (not the initial "no session" on load), clear the
       // signed-out account's data from this device. It stays safe in the cloud
       // and returns on next sign-in. This runs AFTER signedIn=false so the empty
@@ -340,20 +345,35 @@
     cloud.unsub = fs.onSnapshot(cloud.docRef, function (snap) {
       if (snap.metadata.hasPendingWrites) return; // ignore our own local echo
       var d = snap.exists() ? snap.data() : null;
-      if (!d || !d.payload) {
-        // Account has no data yet -> seed it from this device.
-        cloud.status = 'Synced';
-        scheduleCloudSave(true);
-        if (state.accountOpen) render();
-        return;
-      }
-      applyRemote(d.payload);
       cloud.status = 'Synced';
-      if (state.accountOpen) render();
+      if (d && d.payload) {
+        // Cloud has data -> adopt it (this is the sign-in restore path).
+        cloud.hydrating = false;
+        applyRemote(d.payload);
+      } else {
+        // Account has no data yet. Only seed it from this device if the device
+        // actually has something — never overwrite with an empty state.
+        cloud.hydrating = false;
+        if (hasLocalData()) scheduleCloudSave(true);
+        if (state.accountOpen) render();
+      }
     }, function (err) {
+      cloud.hydrating = false;
       cloud.error = 'Sync error: ' + err.message;
       if (state.accountOpen) render();
     });
+  }
+
+  function hasLocalData() {
+    var data = state.data || {};
+    for (var y in data) {
+      var months = data[y] || {};
+      for (var m in months) {
+        var b = months[m] || {};
+        if ((b.income && b.income.length) || (b.expenses && b.expenses.length) || (b.savings && b.savings.length)) return true;
+      }
+    }
+    return !!(state.recurring && state.recurring.length);
   }
 
   function applyRemote(payload) {
