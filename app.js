@@ -591,7 +591,7 @@
       '<div class="eyebrow" style="margin-bottom:6px">Year at a glance</div>' +
       glance(icoDown(), 'Income', fmt(inc, disp), pct(inc, maxT), showNat(incN, disp), natStr(incN)) +
       glance(icoUp(), 'Expenses', fmt(exp, disp), pct(exp, maxT), showNat(expN, disp), natStr(expN)) +
-      glance(icoTrend(), 'Saved (the rest)', fmtSigned(sav, disp), pct(sav, maxT), false, '') +
+      glance(icoTrend(), 'Savings / Investments', fmtSigned(sav, disp), pct(sav, maxT), false, '') +
       '</section>';
 
     // month table
