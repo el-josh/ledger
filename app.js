@@ -11,8 +11,8 @@
 
   // ---- constants ----------------------------------------------------------
   // Currencies the picker offers (the supported, reliably-converting set).
-  var PINNED = ['NGN', 'USD', 'GBP', 'EUR', 'CAD'];
-  var CURRENCY_CODES = ['NGN', 'USD', 'GBP', 'EUR', 'CAD'];
+  var PINNED = ['NGN', 'USD', 'GBP', 'EUR', 'CAD', 'GHS'];
+  var CURRENCY_CODES = ['NGN', 'USD', 'GBP', 'EUR', 'CAD', 'GHS'];
   var _curNames = (function () { try { return new Intl.DisplayNames(['en'], { type: 'currency' }); } catch (e) { return null; } })();
   var _nameCache = {}, _symCache = {};
   function curName(c) {
@@ -63,7 +63,7 @@
   // Fallback rates (Naira per unit) so the pinned currencies always convert,
   // even before a live fetch. RATES_V marks a map as multi-currency (v2); older
   // saved maps lack it and trigger a one-time refresh.
-  var DEFAULT_RATES = { NGN: 1, USD: 1600, GBP: 2000, EUR: 1750, CAD: 1150 };
+  var DEFAULT_RATES = { NGN: 1, USD: 1600, GBP: 2000, EUR: 1750, CAD: 1150, GHS: 105 };
   var RATES_V = 2;
   function mergeRates(saved) { return Object.assign({}, DEFAULT_RATES, saved || {}); }
 
