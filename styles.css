@@ -64,10 +64,12 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
   .header .grp-currency .cur-wrap { flex: 1; min-width: 0; margin-right: 12px; }
   .header .grp-currency .cur-select { max-width: 100%; width: 100%; }
   .header .grp-actions { order: 3; flex-basis: 100%; justify-content: flex-start; gap: 12px; }
-  .header .account-btn { background: #e4e7e2; padding: 4px; border-radius: 12px; gap: 0; }
-  .header .account-btn .account-name { display: none; }
-  .header .account-btn .avatar { width: 40px; height: 40px; border-radius: 9px; }
-  .header .account-btn .avatar-fallback { width: 40px; height: 40px; font-size: 18px; }
+  /* Signed-in account button collapses to a framed avatar; the Sign-in button
+     keeps its "Sign in" label so it isn't just a bare Google icon. */
+  .header .acct-avatar { background: #e4e7e2; padding: 4px; border-radius: 12px; gap: 0; }
+  .header .acct-avatar .account-name { display: none; }
+  .header .acct-avatar .avatar { width: 40px; height: 40px; border-radius: 9px; }
+  .header .acct-avatar .avatar-fallback { width: 40px; height: 40px; font-size: 18px; }
 }
 
 .segset { display: inline-flex; background: var(--chip); border-radius: 999px; padding: 3px; }
