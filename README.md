@@ -39,6 +39,13 @@ mid-market rates for all currencies from a keyless, CORS-enabled source:
 Rates refresh silently on load when the saved ones are more than 12 hours old.
 If you're offline, the last saved rates are kept.
 
+### Quick add & receipt capture
+A floating **+** button (bottom-right) lets you add an expense from anywhere:
+- **Add expense** — a quick form (amount, name, category, currency, date).
+- **Scan receipt** — snap a photo, frame it with a draggable crop box, optionally
+  apply a black-&-white "scan" look, then confirm the details and save. (Reading
+  the total automatically from the photo is planned as a follow-up.)
+
 ### Export a statement of account
 Press **Export** to download a detailed statement for the selected year:
 

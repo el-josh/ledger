@@ -84,7 +84,7 @@
       // transient view state
       view: 'dashboard', activeMonth: null, modal: null,
       settingsOpen: false, ratesMsg: null, recurringOpen: false,
-      importData: null, toast: null, accountOpen: false, exportOpen: false
+      importData: null, toast: null, accountOpen: false, exportOpen: false, fabOpen: false
     };
   }
 
@@ -104,7 +104,7 @@
         recurring: o.recurring || [],
         view: 'dashboard', activeMonth: null, modal: null,
         settingsOpen: false, ratesMsg: null, recurringOpen: false,
-        importData: null, toast: null, accountOpen: false, exportOpen: false
+        importData: null, toast: null, accountOpen: false, exportOpen: false, fabOpen: false
       };
     } catch (e) { return null; }
   }
@@ -474,9 +474,26 @@
     if (state.importData) html += renderImportHtml();
     if (state.accountOpen) html += renderAccountHtml();
     if (state.exportOpen) html += renderExportHtml();
+    html += renderFab();
     if (state.toast) html += '<div class="toast">' + esc(state.toast) + '</div>';
     app.innerHTML = html;
     persist();
+  }
+
+  function anyOverlayOpen() {
+    return !!(state.modal || state.settingsOpen || state.recurringOpen || state.importData || state.accountOpen || state.exportOpen);
+  }
+  function renderFab() {
+    if (anyOverlayOpen()) return ''; // don't float over an open dialog
+    var html = '<button class="fab" data-act="toggleFab" title="Add">' + icoPlus() + '</button>';
+    if (state.fabOpen) {
+      html = '<div class="fab-backdrop" data-act="closeFab"></div>' +
+        '<div class="fab-menu">' +
+          '<button class="fab-item" data-act="fabScan">' + icoCamera() + 'Scan receipt</button>' +
+          '<button class="fab-item" data-act="fabAdd">' + icoPlus() + 'Add expense</button>' +
+        '</div>' + html;
+    }
+    return html;
   }
 
   // Currency <option>s for the supported set.
@@ -1405,6 +1422,15 @@
       case 'runLedgerImport': runLedgerImport(); break;
       case 'closeImport': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.importData = null; render(); } break;
 
+      case 'toggleFab': state.fabOpen = !state.fabOpen; render(); break;
+      case 'closeFab': state.fabOpen = false; render(); break;
+      case 'fabScan': state.fabOpen = false; render(); scanStart(); break;
+      case 'fabAdd': state.fabOpen = false; render(); openScanConfirm(null); break;
+      case 'scanClose': closeScan(); break;
+      case 'scanRetake': scanStart(); break;
+      case 'cropUse': cropUse(); break;
+      case 'scanSave': scanSave(); break;
+
       case 'signIn': cloudSignIn(); break;
       case 'openAccount': state.accountOpen = true; render(); break;
       case 'closeAccount': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.accountOpen = false; render(); } break;
@@ -1414,6 +1440,11 @@
 
   // treat Enter/Escape inside the entry modal
   document.addEventListener('keydown', function (ev) {
+    if (scanOpen()) {
+      if (ev.key === 'Escape') { closeScan(); }
+      else if (ev.key === 'Enter' && (ev.target.id === 'scan-amount' || ev.target.id === 'scan-name')) { ev.preventDefault(); scanSave(); }
+      return;
+    }
     if (state.modal) {
       if (ev.key === 'Enter' && (ev.target.id === 'm-name' || ev.target.id === 'm-amount')) { ev.preventDefault(); saveModal(); }
       else if (ev.key === 'Escape') { state.modal = null; render(); }
@@ -1444,6 +1475,7 @@
   document.addEventListener('input', function (ev) {
     if (!ev.target) return;
     if (ev.target.id === 'm-amount') { onAmountInput(ev.target); if (state.modal) state.modal.amount = ev.target.value; }
+    else if (ev.target.id === 'scan-amount') { onAmountInput(ev.target); }
     else if (ev.target.id === 'm-name' && state.modal) state.modal.name = ev.target.value;
     else if (ev.target.id === 'ledger-year' && state.importData) state.importData.year = ev.target.value;
   });
@@ -1464,6 +1496,165 @@
   }
 
   // =========================================================================
+  //  SCAN RECEIPT  (step 1: capture -> crop/enhance -> confirm -> save)
+  //  Rendered imperatively into a body-appended layer so background re-renders
+  //  (cloud sync, rate refresh) never disturb the camera/crop/form state.
+  // =========================================================================
+  var scanRoot = null, scanFileInput = null;
+  var scanState = { imgDataUrl: null, img: null, box: null, enhance: false, cleanup: null };
+
+  function ensureScanRoot() { if (!scanRoot) { scanRoot = document.createElement('div'); document.body.appendChild(scanRoot); } return scanRoot; }
+  function scanOpen() { return !!(scanRoot && scanRoot.innerHTML); }
+  function closeScan() { if (scanState.cleanup) { scanState.cleanup(); } if (scanRoot) scanRoot.innerHTML = ''; scanState = { imgDataUrl: null, img: null, box: null, enhance: false, cleanup: null }; }
+  function sval(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function scanStart() {
+    if (!scanFileInput) {
+      scanFileInput = document.createElement('input');
+      scanFileInput.type = 'file'; scanFileInput.accept = 'image/*'; scanFileInput.id = 'scan-file';
+      scanFileInput.setAttribute('capture', 'environment');
+      scanFileInput.style.display = 'none';
+      document.body.appendChild(scanFileInput);
+      scanFileInput.addEventListener('change', function (ev) {
+        var f = ev.target.files && ev.target.files[0]; ev.target.value = '';
+        if (!f) return;
+        var reader = new FileReader();
+        reader.onload = function (e) { openCropper(e.target.result); };
+        reader.readAsDataURL(f);
+      });
+    }
+    scanFileInput.click();
+  }
+
+  function scanShell(title, bodyHtml, footHtml) {
+    return '<div class="scan-overlay"><div class="scan-panel">' +
+      '<div class="scan-head"><span class="title">' + esc(title) + '</span><button class="x" data-act="scanClose">×</button></div>' +
+      '<div class="scan-body">' + bodyHtml + '</div>' +
+      '<div class="scan-foot">' + footHtml + '</div>' +
+      '</div></div>';
+  }
+
+  function openCropper(dataUrl) {
+    var root = ensureScanRoot();
+    var img = new Image();
+    img.onload = function () {
+      scanState.imgDataUrl = dataUrl; scanState.img = img; scanState.enhance = false;
+      root.innerHTML = scanShell('Adjust the crop',
+        '<div class="crop-stage" id="crop-stage"><img id="crop-img" src="' + attr(dataUrl) + '" alt="">' +
+          '<div class="crop-box" id="crop-box">' +
+            '<span class="crop-handle tl" data-h="tl"></span><span class="crop-handle tr" data-h="tr"></span>' +
+            '<span class="crop-handle bl" data-h="bl"></span><span class="crop-handle br" data-h="br"></span>' +
+          '</div></div>' +
+          '<div class="enhance-row"><label><input type="checkbox" id="crop-enhance">Scan look (black &amp; white)</label></div>' +
+          '<div class="scan-hint">Drag the corners to frame the receipt.</div>',
+        '<button class="btn ghost" data-act="scanRetake">Retake</button><div class="spacer"></div>' +
+        '<button class="btn primary" data-act="cropUse">Use photo</button>');
+      setupCrop();
+    };
+    img.src = dataUrl;
+  }
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function setupCrop() {
+    var stage = document.getElementById('crop-stage');
+    var box = document.getElementById('crop-box');
+    var enh = document.getElementById('crop-enhance');
+    if (enh) enh.addEventListener('change', function () { scanState.enhance = enh.checked; });
+    var r0 = stage.getBoundingClientRect();
+    scanState.box = { x: r0.width * 0.06, y: r0.height * 0.06, w: r0.width * 0.88, h: r0.height * 0.88 };
+    var apply = function () { var b = scanState.box; box.style.left = b.x + 'px'; box.style.top = b.y + 'px'; box.style.width = b.w + 'px'; box.style.height = b.h + 'px'; };
+    apply();
+    var drag = null;
+    var pt = function (e) { var r = stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    var down = function (e, mode) { e.preventDefault(); var p = pt(e); drag = { mode: mode, sx: p.x, sy: p.y, b: Object.assign({}, scanState.box) }; };
+    var move = function (e) {
+      if (!drag) return; e.preventDefault();
+      var r = stage.getBoundingClientRect(), W = r.width, H = r.height, MIN = 44;
+      var p = pt(e), dx = p.x - drag.sx, dy = p.y - drag.sy, b = Object.assign({}, drag.b);
+      if (drag.mode === 'move') { b.x = clamp(b.x + dx, 0, W - b.w); b.y = clamp(b.y + dy, 0, H - b.h); }
+      else {
+        var x1 = b.x, y1 = b.y, x2 = b.x + b.w, y2 = b.y + b.h;
+        if (drag.mode.indexOf('l') >= 0) x1 = clamp(b.x + dx, 0, x2 - MIN);
+        if (drag.mode.indexOf('r') >= 0) x2 = clamp(b.x + b.w + dx, x1 + MIN, W);
+        if (drag.mode.indexOf('t') >= 0) y1 = clamp(b.y + dy, 0, y2 - MIN);
+        if (drag.mode.indexOf('b') >= 0) y2 = clamp(b.y + b.h + dy, y1 + MIN, H);
+        b.x = x1; b.y = y1; b.w = x2 - x1; b.h = y2 - y1;
+      }
+      scanState.box = b; apply();
+    };
+    var up = function () { drag = null; };
+    box.addEventListener('pointerdown', function (e) { if (e.target === box) down(e, 'move'); });
+    Array.prototype.forEach.call(box.querySelectorAll('.crop-handle'), function (h) {
+      h.addEventListener('pointerdown', function (e) { e.stopPropagation(); down(e, h.getAttribute('data-h')); });
+    });
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    scanState.cleanup = function () { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); scanState.cleanup = null; };
+  }
+
+  function cropUse() {
+    var stage = document.getElementById('crop-stage');
+    var img = scanState.img, b = scanState.box;
+    var rect = stage.getBoundingClientRect(), scale = img.naturalWidth / rect.width;
+    var sw = b.w * scale, sh = b.h * scale, cap = 1400;
+    var ow = Math.min(sw, cap), oh = sh * (ow / sw);
+    var out = document.createElement('canvas'); out.width = Math.max(1, Math.round(ow)); out.height = Math.max(1, Math.round(oh));
+    var ctx = out.getContext('2d');
+    ctx.drawImage(img, b.x * scale, b.y * scale, sw, sh, 0, 0, out.width, out.height);
+    if (scanState.enhance) {
+      try {
+        var d = ctx.getImageData(0, 0, out.width, out.height), a = d.data, C = 1.35;
+        for (var i = 0; i < a.length; i += 4) { var g = clamp((0.3 * a[i] + 0.59 * a[i + 1] + 0.11 * a[i + 2] - 128) * C + 140, 0, 255); a[i] = a[i + 1] = a[i + 2] = g; }
+        ctx.putImageData(d, 0, 0);
+      } catch (e) {}
+    }
+    var url = out.toDataURL('image/jpeg', 0.85);
+    if (scanState.cleanup) scanState.cleanup();
+    openScanConfirm(url);
+  }
+
+  function openScanConfirm(imgDataUrl) {
+    var root = ensureScanRoot();
+    scanState.imgDataUrl = imgDataUrl;
+    var now = new Date();
+    var defY = state.year, defM = state.activeMonth || (now.getMonth() + 1);
+    var dateStr = defY + '-' + pad2(defM) + '-' + pad2(Math.min(now.getDate(), 28));
+    var catOpts = categoriesFor('expenses', '').map(function (c) { return '<option value="' + attr(c) + '">' + esc(c) + '</option>'; }).join('');
+    var preview = imgDataUrl ? '<img class="scan-preview" src="' + attr(imgDataUrl) + '" alt="receipt">' : '';
+    var body = preview +
+      '<label class="field"><span class="lbl">Amount</span><input id="scan-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0"></label>' +
+      '<label class="field"><span class="lbl">Name / merchant</span><input id="scan-name" placeholder="e.g. Groceries" autocomplete="off"></label>' +
+      '<label class="field"><span class="lbl">Category</span><select id="scan-cat">' + catOpts + '</select></label>' +
+      '<label class="field"><span class="lbl">Currency</span><select id="scan-cur">' + currencyOptions(state.displayCurrency, true) + '</select></label>' +
+      '<label class="field"><span class="lbl">Date</span><input id="scan-date" type="date" value="' + attr(dateStr) + '"></label>' +
+      '<div id="scan-err" class="err sr-hidden">Enter a name and an amount greater than zero.</div>';
+    var foot = (imgDataUrl ? '<button class="btn ghost" data-act="scanRetake">Retake</button>' : '') +
+      '<div class="spacer"></div><button class="btn ghost" data-act="scanClose">Cancel</button>' +
+      '<button class="btn primary" data-act="scanSave">Add expense</button>';
+    root.innerHTML = scanShell(imgDataUrl ? 'Confirm expense' : 'Add expense', body, foot);
+    var amt = document.getElementById('scan-amount'); if (amt) try { amt.focus(); } catch (e) {}
+  }
+
+  function scanSave() {
+    var name = (sval('scan-name') || '').trim();
+    var amount = unformatAmount(sval('scan-amount'));
+    if (!name || !(amount > 0)) { var el = document.getElementById('scan-err'); if (el) el.classList.remove('sr-hidden'); return; }
+    var currency = sval('scan-cur') || state.displayCurrency;
+    var category = sval('scan-cat') || 'Other';
+    var y = state.year, m = state.activeMonth || (new Date().getMonth() + 1);
+    var mt = /(\d{4})-(\d{2})-(\d{2})/.exec(sval('scan-date') || '');
+    if (mt) { y = parseInt(mt[1], 10); m = parseInt(mt[2], 10); }
+    var data = clone(state.data);
+    ensure(data, y, m).expenses.push({ id: genId(), name: name, amount: amount, currency: currency, category: category, recurring: false });
+    state.data = data; state.year = y;
+    persist(); closeScan();
+    toast('Expense added to ' + MONTHS[m - 1] + ' ' + y);
+    render();
+  }
+
+  // =========================================================================
   //  ICONS
   // =========================================================================
   function eyeIcon() {
@@ -1479,6 +1670,8 @@
   function icoUpload() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'; }
   function icoRate() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l-3-3"/><path d="M21 17H8l3 3"/></svg>'; }
   function icoDownload() { return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'; }
+  function icoPlus() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'; }
+  function icoCamera() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>'; }
   function icoGoogle() { return '<svg width="15" height="15" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>'; }
 
   // =========================================================================
