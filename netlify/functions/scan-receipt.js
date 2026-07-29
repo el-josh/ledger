@@ -8,8 +8,13 @@
    in the Netlify dashboard (Site settings -> Environment variables) — it is
    never shipped to the browser. Free-tier Gemini is plenty for low volume.
 
-   Setup is documented in README.md -> "Scan a receipt (auto-extract)".
+   Uses Node's built-in https module (not the global fetch) so it works on every
+   Netlify Node runtime, old or new.
+
+   Setup is documented in README.md -> "Auto-extraction setup".
 --------------------------------------------------------------------------- */
+const https = require('https');
+
 const MODEL = 'gemini-2.0-flash';
 
 const PROMPT = [
@@ -17,8 +22,8 @@ const PROMPT = [
   'amount the customer paid, the merchant/store name, the transaction date and',
   'the currency.',
   'The total is the grand total actually paid — look for TOTAL, RECEIPT TOTAL,',
-  'AMOUNT PAID, or, on a bank/card slip, the single large highlighted amount',
-  '(e.g. "NGN70,000.00"). Ignore subtotals, tax lines, change and item prices.',
+  'AMOUNT PAID, CARD PAID, or, on a bank/card slip, the single large highlighted',
+  'amount (e.g. "NGN70,000.00"). Ignore subtotals, tax lines, change and item prices.',
   'Return ONLY JSON with exactly these keys:',
   '{"total": number|null, "currency": "ISO 4217 code"|null, "merchant": string|null, "date": "YYYY-MM-DD"|null}',
   'Use a plain number for total (no thousands separators or symbols). Prefer',
@@ -31,6 +36,27 @@ function json(statusCode, obj) {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     body: JSON.stringify(obj)
   };
+}
+
+// POST JSON to a URL via the built-in https module. Resolves { status, text }.
+function postJson(url, payload) {
+  return new Promise(function (resolve, reject) {
+    var data = Buffer.from(JSON.stringify(payload));
+    var u = new URL(url);
+    var req = https.request({
+      hostname: u.hostname,
+      path: u.pathname + u.search,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length }
+    }, function (res) {
+      var chunks = [];
+      res.on('data', function (c) { chunks.push(c); });
+      res.on('end', function () { resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString('utf8') }); });
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
 }
 
 exports.handler = async function (event) {
@@ -52,28 +78,28 @@ exports.handler = async function (event) {
   };
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + MODEL + ':generateContent?key=' + encodeURIComponent(key);
 
+  let res;
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      const detail = (await res.text()).slice(0, 300);
-      return json(502, { error: 'Gemini request failed (' + res.status + ').', detail: detail });
-    }
-    const data = await res.json();
-    let text = '{}';
-    try { text = data.candidates[0].content.parts[0].text || '{}'; } catch (e) {}
-    let parsed = {};
-    try { parsed = JSON.parse(text); } catch (e) {}
-    return json(200, {
-      total: typeof parsed.total === 'number' ? parsed.total : (parseFloat(parsed.total) || null),
-      currency: parsed.currency || null,
-      merchant: parsed.merchant || null,
-      date: parsed.date || null
-    });
+    res = await postJson(url, payload);
   } catch (e) {
-    return json(502, { error: 'Could not reach Gemini.', detail: String(e && e.message || e).slice(0, 200) });
+    return json(502, { error: 'Could not reach Gemini.', detail: String((e && e.message) || e).slice(0, 200) });
   }
+
+  if (res.status < 200 || res.status >= 300) {
+    return json(502, { error: 'Gemini request failed (' + res.status + ').', detail: res.text.slice(0, 300) });
+  }
+
+  let data = {};
+  try { data = JSON.parse(res.text); } catch (e) {}
+  let text = '{}';
+  try { text = data.candidates[0].content.parts[0].text || '{}'; } catch (e) {}
+  let parsed = {};
+  try { parsed = JSON.parse(text); } catch (e) {}
+
+  return json(200, {
+    total: typeof parsed.total === 'number' ? parsed.total : (parseFloat(parsed.total) || null),
+    currency: parsed.currency || null,
+    merchant: parsed.merchant || null,
+    date: parsed.date || null
+  });
 };

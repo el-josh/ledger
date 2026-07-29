@@ -1652,32 +1652,44 @@
     el.className = 'scan-status' + (cls ? ' ' + cls : '');
     el.innerHTML = html;
   }
+  function extractFail(reason) {
+    var base = 'Couldn’t read it automatically — enter the total below.';
+    var msg = reason ? base + ' <span class="scan-reason">(' + esc(String(reason).slice(0, 80)) + ')</span>' : base;
+    setScanStatus(msg, 'warn');
+    var a = document.getElementById('scan-amount'); if (a) try { a.focus(); } catch (e) {}
+  }
   function runExtraction(imgDataUrl) {
     var ep = scanEndpoint();
     var base64 = String(imgDataUrl).split(',')[1] || '';
+    var status = 0;
     fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: base64, mimeType: 'image/jpeg' }) })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(function (res) {
-        if (res && res.error) throw new Error(res.error);
+      .then(function (r) { status = r.status; return r.text(); })
+      .then(function (raw) {
+        var res = {};
+        try { res = JSON.parse(raw); } catch (e) {}
+        // Non-2xx, or the function/Gemini reported an error: surface a short reason.
+        if (status < 200 || status >= 300 || (res && res.error)) {
+          var reason = (res && (res.error || res.detail)) ||
+            (status === 404 ? 'function not deployed (404)' : status ? 'HTTP ' + status : 'no response');
+          extractFail(reason);
+          return;
+        }
         var filled = [];
         var amt = document.getElementById('scan-amount');
-        if (amt && res && res.total > 0) { amt.value = groupThousands(String(res.total)); filled.push('amount'); }
+        if (amt && res.total > 0) { amt.value = groupThousands(String(res.total)); filled.push('amount'); }
         var nm = document.getElementById('scan-name');
-        if (nm && res && res.merchant && !nm.value) { nm.value = String(res.merchant).slice(0, 60); filled.push('name'); }
+        if (nm && res.merchant && !nm.value) { nm.value = String(res.merchant).slice(0, 60); filled.push('name'); }
         var cur = document.getElementById('scan-cur');
-        if (cur && res && res.currency) { var cc = String(res.currency).toUpperCase(); if (CURRENCY_CODES.indexOf(cc) >= 0) { cur.value = cc; filled.push('currency'); } }
+        if (cur && res.currency) { var cc = String(res.currency).toUpperCase(); if (CURRENCY_CODES.indexOf(cc) >= 0) { cur.value = cc; filled.push('currency'); } }
         var dt = document.getElementById('scan-date');
-        if (dt && res && /^\d{4}-\d{2}-\d{2}$/.test(res.date || '')) { dt.value = res.date; filled.push('date'); }
+        if (dt && /^\d{4}-\d{2}-\d{2}$/.test(res.date || '')) { dt.value = res.date; filled.push('date'); }
         var catSel = document.getElementById('scan-cat');
-        if (catSel && res && res.merchant) { var g = autoCategory(res.merchant, 'expenses'); if (categoriesFor('expenses', '').indexOf(g) >= 0) catSel.value = g; }
+        if (catSel && res.merchant) { var g = autoCategory(res.merchant, 'expenses'); if (categoriesFor('expenses', '').indexOf(g) >= 0) catSel.value = g; }
         if (filled.length) setScanStatus('✓ Auto-filled — please check and save.', 'ok');
-        else setScanStatus('Couldn’t read it automatically — enter the total below.', 'warn');
-        if (!(res && res.total > 0)) { var a2 = document.getElementById('scan-amount'); if (a2) try { a2.focus(); } catch (e) {} }
+        else extractFail('total not found on the receipt');
+        if (!(res.total > 0)) { var a2 = document.getElementById('scan-amount'); if (a2) try { a2.focus(); } catch (e) {} }
       })
-      .catch(function (err) {
-        setScanStatus('Couldn’t read it automatically — enter the total below.', 'warn');
-        var a = document.getElementById('scan-amount'); if (a) try { a.focus(); } catch (e) {}
-      });
+      .catch(function (err) { extractFail(String((err && err.message) || err)); });
   }
 
   function scanSave() {

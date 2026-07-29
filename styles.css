@@ -262,6 +262,11 @@ table.months tfoot td { border-top: 2px solid #e6e9e2; font-weight: 800; }
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238f9490' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
   background-repeat: no-repeat; background-position: right 16px center;
 }
+/* iOS renders type=date as a native control that's taller than text inputs;
+   neutralize its appearance and the value's extra margin so it matches. */
+.field input[type=date] { -webkit-appearance: none; appearance: none; min-height: 0; }
+.field input[type=date]::-webkit-date-and-time-value { margin: 0; padding: 0; text-align: left; }
+.field input[type=date]::-webkit-calendar-picker-indicator { margin: 0 0 0 auto; padding: 0; }
 .field input:focus, .field select:focus { border-color: #b7bdb2; }
 .segset.full { width: 100%; margin-top: 8px; }
 .segset.full .seg { flex: 1; padding: 9px 12px; }
@@ -361,6 +366,7 @@ table.months tfoot td { border-top: 2px solid #e6e9e2; font-weight: 800; }
 .scan-status { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; font-weight: 700; color: var(--ink-soft); }
 .scan-status.ok { color: var(--ok); }
 .scan-status.warn { color: var(--accent-warn); }
+.scan-status .scan-reason { font-weight: 600; opacity: 0.75; }
 .scan-status svg { flex-shrink: 0; }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
