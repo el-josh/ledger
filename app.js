@@ -827,10 +827,63 @@
       });
       html += '</div>';
     }
+    html += recurringAddHtml();
     html += '<div class="modal-actions"><div class="spacer"></div>' +
       '<button class="btn primary" data-act="closeRecurring">Done</button></div>' +
       '</div></div>';
     return html;
+  }
+
+  // The inline "add a new recurring item" form shown inside the manager modal.
+  function recurringAddHtml() {
+    var f = state.recurringForm;
+    if (!f) return '<button class="addbtn" data-act="newRecurring" style="margin-top:16px">+ Add recurring item</button>';
+    var secOpts = ['income', 'expenses', 'savings'].map(function (s) {
+      return '<option value="' + s + '"' + (f.section === s ? ' selected' : '') + '>' + SECTIONS[s] + '</option>';
+    }).join('');
+    var catOpts = categoriesFor(f.section, f.category).map(function (c) {
+      return '<option value="' + attr(c) + '"' + (f.category === c ? ' selected' : '') + '>' + esc(c) + '</option>';
+    }).join('');
+    return '<div class="recur-add">' +
+      '<div class="recur-add-title">New recurring item</div>' +
+      '<label class="field"><span class="lbl">Type</span><select id="r-section">' + secOpts + '</select></label>' +
+      '<label class="field"><span class="lbl">Name</span><input id="r-name" value="' + attr(f.name) + '" placeholder="e.g. Netflix" autocomplete="off"></label>' +
+      '<label class="field"><span class="lbl">Amount</span><input id="r-amount" type="text" inputmode="decimal" autocomplete="off" value="' + attr(groupThousands(f.amount)) + '" placeholder="0"></label>' +
+      '<label class="field"><span class="lbl">Category</span><select id="r-category">' + catOpts + '</select></label>' +
+      '<label class="field"><span class="lbl">Currency</span><select id="r-currency">' + currencyOptions(f.currency, true) + '</select></label>' +
+      (f.error ? '<div class="err">Enter a name and an amount greater than zero.</div>' : '') +
+      '<div class="modal-actions">' +
+        '<button class="btn ghost" data-act="cancelRecurring">Cancel</button>' +
+        '<div class="spacer"></div>' +
+        '<button class="btn primary" data-act="saveRecurring">Add item</button>' +
+      '</div></div>';
+  }
+
+  function syncRecurringForm() {
+    var f = state.recurringForm; if (!f) return;
+    var s = document.getElementById('r-section'); if (s) f.section = s.value;
+    var n = document.getElementById('r-name'); if (n) f.name = n.value;
+    var a = document.getElementById('r-amount'); if (a) f.amount = a.value;
+    var c = document.getElementById('r-category'); if (c) f.category = c.value;
+    var cu = document.getElementById('r-currency'); if (cu) f.currency = cu.value;
+  }
+
+  function newRecurringForm(section) {
+    section = section || 'expenses';
+    return { section: section, name: '', amount: '', currency: state.displayCurrency,
+             category: (categoriesFor(section, '')[0] || 'Other'), categoryTouched: false, error: false };
+  }
+
+  function saveNewRecurring() {
+    var f = state.recurringForm; if (!f) return;
+    syncRecurringForm();
+    var name = (f.name || '').trim();
+    var amount = unformatAmount(f.amount);
+    if (!name || !(amount > 0)) { f.error = true; render(); return; }
+    upsertRecurring(f.section, name, amount, f.currency, f.category);
+    state.recurringForm = newRecurringForm(f.section); // reset, keep type, ready for another
+    persist(); render();
+    toast('Recurring item added');
   }
 
   // =========================================================================
@@ -1405,9 +1458,12 @@
       case 'closeModal': if (isBackdrop(ev, t)) { state.modal = null; render(); } break;
 
       case 'applyRecurring': applyRecurring(state.year, state.activeMonth); break;
-      case 'openRecurring': state.recurringOpen = true; render(); break;
-      case 'closeRecurring': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.recurringOpen = false; render(); } break;
+      case 'openRecurring': state.recurringOpen = true; state.recurringForm = null; render(); break;
+      case 'closeRecurring': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.recurringOpen = false; state.recurringForm = null; render(); } break;
       case 'delRecurring': removeRecurring(t.getAttribute('data-id')); break;
+      case 'newRecurring': state.recurringForm = newRecurringForm(); render(); break;
+      case 'cancelRecurring': state.recurringForm = null; render(); break;
+      case 'saveRecurring': saveNewRecurring(); break;
 
       case 'openSettings': state.settingsOpen = true; state.ratesMsg = null; render(); break;
       case 'closeSettings': if (t.tagName === 'BUTTON' || isBackdrop(ev, t)) { state.settingsOpen = false; state.ratesMsg = null; render(); } break;
@@ -1468,6 +1524,15 @@
       if (ev.target.id === 'm-category') { state.modal.category = ev.target.value; state.modal.categoryTouched = true; }
       else if (ev.target.id === 'm-recur') state.modal.recurring = ev.target.checked;
     }
+    if (state.recurringForm) {
+      if (ev.target.id === 'r-section') {
+        syncRecurringForm(); state.recurringForm.section = ev.target.value;
+        if (!state.recurringForm.categoryTouched) state.recurringForm.category = categoriesFor(ev.target.value, '')[0] || 'Other';
+        render(); return;
+      }
+      if (ev.target.id === 'r-category') { state.recurringForm.category = ev.target.value; state.recurringForm.categoryTouched = true; return; }
+      if (ev.target.id === 'r-currency') { state.recurringForm.currency = ev.target.value; return; }
+    }
     if (state.importData && state.importData.mode === 'table' &&
         (ev.target.matches('[data-map]') || ev.target.matches('[data-def]'))) {
       readImportControls();
@@ -1478,6 +1543,8 @@
     if (!ev.target) return;
     if (ev.target.id === 'm-amount') { onAmountInput(ev.target); if (state.modal) state.modal.amount = ev.target.value; }
     else if (ev.target.id === 'scan-amount') { onAmountInput(ev.target); }
+    else if (ev.target.id === 'r-amount') { onAmountInput(ev.target); if (state.recurringForm) state.recurringForm.amount = ev.target.value; }
+    else if (ev.target.id === 'r-name' && state.recurringForm) state.recurringForm.name = ev.target.value;
     else if (ev.target.id === 'm-name' && state.modal) state.modal.name = ev.target.value;
     else if (ev.target.id === 'ledger-year' && state.importData) state.importData.year = ev.target.value;
   });
