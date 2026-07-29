@@ -1,0 +1,8 @@
+# Netlify configuration.
+# Only declares the serverless functions directory so the receipt scanner
+# deploys automatically. The static site is still published from the repo root
+# (whatever your existing Netlify "publish directory" is set to — this file
+# intentionally does not change it).
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"

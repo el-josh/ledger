@@ -43,8 +43,38 @@ If you're offline, the last saved rates are kept.
 A floating **+** button (bottom-right) lets you add an expense from anywhere:
 - **Add expense** — a quick form (amount, name, category, currency, date).
 - **Scan receipt** — snap a photo, frame it with a draggable crop box, optionally
-  apply a black-&-white "scan" look, then confirm the details and save. (Reading
-  the total automatically from the photo is planned as a follow-up.)
+  apply a black-&-white "scan" look. The app then **reads the total, merchant,
+  date and currency automatically** and pre-fills the confirm sheet — check the
+  values and save. If auto-extraction is unavailable (or can't read the photo),
+  you just type the total in yourself; nothing breaks.
+
+#### Auto-extraction setup (optional, ~3 minutes)
+Auto-extraction sends the cropped photo to Google's **Gemini Flash** model to
+read the numbers. The API key is kept **server-side** in a tiny
+[Netlify Function](netlify/functions/scan-receipt.js) so it's never shipped to
+the browser. It's **off until you configure it** — until then, Scan still works
+and simply opens a blank confirm sheet for you to fill in.
+
+To turn it on (the app already deploys the function; you only add a key):
+
+**1. Get a free Gemini API key**
+- Go to <https://aistudio.google.com/apikey> → *Create API key*. The free tier
+  is plenty for low volume (well under Gemini's free daily limits).
+
+**2. Add the key to your host (Netlify)**
+- Netlify dashboard → your site → *Site settings → Environment variables →
+  Add a variable*.
+- Key: `GEMINI_API_KEY`  ·  Value: the key from step 1.
+- **Never commit this key to the repo** — it lives only in the host's env vars.
+- Trigger a redeploy (*Deploys → Trigger deploy*) so the function picks it up.
+
+That's it — scan a receipt and the total fills in automatically.
+
+> **Not on Netlify?** The client posts the image to
+> `/.netlify/functions/scan-receipt` by default. To point it elsewhere, set
+> `window.LEDGER_CONFIG.scanEndpoint = 'https://…'` in `config.js`, or set it to
+> `''`/`null` to disable auto-extraction entirely (Scan then opens a blank
+> confirm sheet).
 
 ### Export a statement of account
 Press **Export** to download a detailed statement for the selected year:
@@ -142,6 +172,8 @@ device; afterwards all devices share one synced ledger.
 | `app.js` | All application logic |
 | `config.js` | Optional Firebase config for cross-device sync |
 | `firestore.rules` | Firestore security rules (per-user access) |
+| `netlify/functions/scan-receipt.js` | Serverless receipt reader (hides the Gemini key) |
+| `netlify.toml` | Netlify config (declares the functions directory) |
 | `vendor/xlsx.full.min.js` | SheetJS, for spreadsheet parsing |
 
 ## Data & privacy
