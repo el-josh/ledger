@@ -788,7 +788,6 @@
     }).join('');
     return '<div class="overlay" data-act="closeSettings"><div class="modal" data-stop="1">' +
       '<div class="title">Exchange rates</div>' +
-      '<div class="desc">Live mid-market rates, fetched automatically — no API key or sign-up needed. Rates below are shown as Naira per 1 unit. Entries keep their original currency; this only affects converted totals.</div>' +
 
       '<div class="rate-status">' +
         '<div class="rate-row"><span>Source</span><strong>' + esc(srcLabel) + '</strong></div>' +
