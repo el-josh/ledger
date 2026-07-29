@@ -1631,6 +1631,8 @@
       '<label class="field"><span class="lbl">Category</span><select id="scan-cat">' + catOpts + '</select></label>' +
       '<label class="field"><span class="lbl">Currency</span><select id="scan-cur">' + currencyOptions(state.displayCurrency, true) + '</select></label>' +
       '<label class="field"><span class="lbl">Date</span><input id="scan-date" type="date" value="' + attr(dateStr) + '"></label>' +
+      '<label class="checkrow"><input id="scan-recur" type="checkbox">' +
+        '<span><span class="txt">Repeat every month</span><div class="sub">Remember this so you don’t re-enter it next month.</div></span></label>' +
       '<div id="scan-err" class="err sr-hidden">Enter a name and an amount greater than zero.</div>';
     var foot = (imgDataUrl ? '<button class="btn ghost" data-act="scanRetake">Retake</button>' : '') +
       '<div class="spacer"></div>' +
@@ -1702,8 +1704,11 @@
     var y = state.year, m = state.activeMonth || (new Date().getMonth() + 1);
     var mt = /(\d{4})-(\d{2})-(\d{2})/.exec(sval('scan-date') || '');
     if (mt) { y = parseInt(mt[1], 10); m = parseInt(mt[2], 10); }
+    var recurEl = document.getElementById('scan-recur');
+    var recur = !!(recurEl && recurEl.checked);
     var data = clone(state.data);
-    ensure(data, y, m).expenses.push({ id: genId(), name: name, amount: amount, currency: currency, category: category, recurring: false });
+    ensure(data, y, m).expenses.push({ id: genId(), name: name, amount: amount, currency: currency, category: category, recurring: recur });
+    if (recur) upsertRecurring('expenses', name, amount, currency, category);
     state.data = data; state.year = y;
     persist(); closeScan();
     toast('Expense added to ' + MONTHS[m - 1] + ' ' + y);
