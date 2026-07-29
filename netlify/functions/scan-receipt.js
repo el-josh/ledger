@@ -15,7 +15,9 @@
 --------------------------------------------------------------------------- */
 const https = require('https');
 
-const MODEL = 'gemini-2.0-flash';
+// Tried in order. Each model has its OWN free-tier quota, so if the first is
+// rate-limited (429) we fall through to the next, which often still has room.
+const MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash'];
 
 const PROMPT = [
   'You are a receipt/payment-slip parser. Read the image and return the final',
@@ -76,30 +78,45 @@ exports.handler = async function (event) {
     contents: [{ parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: image } }] }],
     generationConfig: { temperature: 0, responseMimeType: 'application/json' }
   };
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + MODEL + ':generateContent?key=' + encodeURIComponent(key);
 
-  let res;
-  try {
-    res = await postJson(url, payload);
-  } catch (e) {
-    return json(502, { error: 'Could not reach Gemini.', detail: String((e && e.message) || e).slice(0, 200) });
+  // Pull Google's human-readable message out of an error body, if present.
+  function googleMsg(bodyText) {
+    try { var b = JSON.parse(bodyText); if (b && b.error && b.error.message) return String(b.error.message); } catch (e) {}
+    return (bodyText || '').slice(0, 200);
   }
 
-  if (res.status < 200 || res.status >= 300) {
-    return json(502, { error: 'Gemini request failed (' + res.status + ').', detail: res.text.slice(0, 300) });
+  let last = null; // remember the most informative failure to report
+  for (let i = 0; i < MODELS.length; i++) {
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + MODELS[i] + ':generateContent?key=' + encodeURIComponent(key);
+    let res;
+    try {
+      res = await postJson(url, payload);
+    } catch (e) {
+      last = { code: 502, error: 'Could not reach Gemini.', detail: String((e && e.message) || e).slice(0, 200) };
+      continue;
+    }
+
+    if (res.status >= 200 && res.status < 300) {
+      let data = {};
+      try { data = JSON.parse(res.text); } catch (e) {}
+      let text = '{}';
+      try { text = data.candidates[0].content.parts[0].text || '{}'; } catch (e) {}
+      let parsed = {};
+      try { parsed = JSON.parse(text); } catch (e) {}
+      return json(200, {
+        model: MODELS[i],
+        total: typeof parsed.total === 'number' ? parsed.total : (parseFloat(parsed.total) || null),
+        currency: parsed.currency || null,
+        merchant: parsed.merchant || null,
+        date: parsed.date || null
+      });
+    }
+
+    // Non-2xx. 429/500/503 are transient/quota — try the next model. Others too.
+    last = { code: 502, error: 'Gemini request failed (' + res.status + ').', detail: googleMsg(res.text), status: res.status };
+    // A quota/rate error is worth reporting clearly if every model fails.
+    if (res.status === 429) last.error = 'Free-tier quota reached (429). ' + googleMsg(res.text).slice(0, 160);
   }
 
-  let data = {};
-  try { data = JSON.parse(res.text); } catch (e) {}
-  let text = '{}';
-  try { text = data.candidates[0].content.parts[0].text || '{}'; } catch (e) {}
-  let parsed = {};
-  try { parsed = JSON.parse(text); } catch (e) {}
-
-  return json(200, {
-    total: typeof parsed.total === 'number' ? parsed.total : (parseFloat(parsed.total) || null),
-    currency: parsed.currency || null,
-    merchant: parsed.merchant || null,
-    date: parsed.date || null
-  });
+  return json((last && last.code) || 502, last || { error: 'Gemini request failed.' });
 };

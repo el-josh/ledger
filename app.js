@@ -1633,7 +1633,7 @@
       '<label class="field"><span class="lbl">Date</span><input id="scan-date" type="date" value="' + attr(dateStr) + '"></label>' +
       '<div id="scan-err" class="err sr-hidden">Enter a name and an amount greater than zero.</div>';
     var foot = (imgDataUrl ? '<button class="btn ghost" data-act="scanRetake">Retake</button>' : '') +
-      '<div class="spacer"></div><button class="btn ghost" data-act="scanClose">Cancel</button>' +
+      '<div class="spacer"></div>' +
       '<button class="btn primary" data-act="scanSave">Add expense</button>';
     root.innerHTML = scanShell(imgDataUrl ? 'Confirm expense' : 'Add expense', body, foot);
     if (willExtract) runExtraction(imgDataUrl);
