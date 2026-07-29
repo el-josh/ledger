@@ -142,14 +142,10 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 .iconbtn:hover { background: #e2e5e0; }
 
 /* mini bar chart in hero */
-.bars { display: flex; align-items: flex-end; gap: 10px; position: relative; }
-/* Zero baseline: bars above = saved, bars below = overspent. */
-.bars::before { content: ""; position: absolute; left: 0; right: 0; top: 46px; height: 1px; background: var(--line); }
+.bars { display: flex; align-items: flex-end; gap: 10px; }
 .bars .bar-col { display: flex; flex-direction: column; align-items: center; gap: 9px; }
-.bars .bar-track { position: relative; width: 17px; height: 92px; }
-.bars .bar { position: absolute; left: 0; right: 0; width: 17px; }
-.bars .bar.pos { bottom: 50%; border-radius: 9px 9px 0 0; }   /* grows up from center */
-.bars .bar.neg { top: 50%; border-radius: 0 0 9px 9px; }      /* grows down from center */
+.bars .bar-track { display: flex; align-items: flex-end; height: 92px; }
+.bars .bar { width: 17px; border-radius: 9px; }
 .bars .bar-label { font-size: 10.5px; font-weight: 600; color: var(--muted); }
 
 /* year-at-a-glance rows */
@@ -318,9 +314,8 @@ table.months tfoot td { border-top: 2px solid #e6e9e2; font-weight: 800; }
 @media (max-width: 640px) {
   .hero-top { gap: 20px; }
   .bars { width: 100%; gap: 0; justify-content: space-between; align-items: flex-end; }
-  .bars::before { top: 37px; }
   .bars .bar-col { gap: 7px; min-width: 0; }
-  .bars .bar, .bars .bar-track { width: 11px; }
+  .bars .bar { width: 11px; }
   .bars .bar-track { height: 74px; }
   .bars .bar-label { font-size: 9px; }
 }

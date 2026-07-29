@@ -588,12 +588,10 @@
     var maxAbs = Math.max.apply(null, [1].concat(withData.map(function (m) { return Math.abs(m.net); })));
     var lastNum = withData.length ? withData[withData.length - 1].mo : 0;
     var bars = withData.map(function (m) {
-      // Each half of the track represents the largest monthly magnitude, so a
-      // full-size bar fills exactly half. Positive grows up, negative grows down.
-      var hpct = Math.max(4, Math.round(Math.abs(m.net) / maxAbs * 50));
-      return { height: hpct + '%',
-               neg: m.net < 0,
-               color: m.mo === lastNum ? '#0e0f0c' : (m.net < 0 ? '#b4b8af' : '#dfe3dc'),
+      // Bars grow up from the baseline; height is the month's magnitude. Negative
+      // (overspent) months are red so a tall red bar reads as a big overspend.
+      return { height: Math.max(10, Math.round(Math.abs(m.net) / maxAbs * 100)) + '%',
+               color: m.net < 0 ? '#c0473a' : (m.mo === lastNum ? '#0e0f0c' : '#dfe3dc'),
                label: m.name.slice(0, 3) };
     });
 
@@ -608,7 +606,7 @@
       '</div>';
     if (bars.length) {
       html += '<div class="bars">' + bars.map(function (b) {
-        return '<div class="bar-col"><div class="bar-track"><div class="bar ' + (b.neg ? 'neg' : 'pos') + '" style="height:' + b.height + ';background:' + b.color + '"></div></div><span class="bar-label">' + b.label + '</span></div>';
+        return '<div class="bar-col"><div class="bar-track"><div class="bar" style="height:' + b.height + ';background:' + b.color + '"></div></div><span class="bar-label">' + b.label + '</span></div>';
       }).join('') + '</div>';
     }
     html += '</div></section>';
