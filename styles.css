@@ -64,6 +64,9 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
   .header .grp-currency .cur-wrap { flex: 1; min-width: 0; margin-right: 12px; }
   .header .grp-currency .cur-select { max-width: 100%; width: 100%; }
   .header .grp-actions { order: 3; flex-basis: 100%; justify-content: flex-start; gap: 12px; }
+  /* Recurring & Import live in less-frequent flows; hide them on mobile to
+     keep the action row uncluttered (still available on larger screens). */
+  .header .grp-actions .hide-mobile { display: none; }
   /* Signed-in account button collapses to a framed avatar; the Sign-in button
      keeps its "Sign in" label so it isn't just a bare Google icon. */
   .header .acct-avatar { background: #e4e7e2; padding: 4px; border-radius: 12px; gap: 0; }

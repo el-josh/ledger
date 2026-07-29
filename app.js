@@ -520,8 +520,8 @@
         '</div>' +
         '<div class="grp grp-actions">' +
           '<button class="pill" data-act="openExport" title="Export a statement">' + icoDownload() + 'Export Statement</button>' +
-          '<button class="pill" data-act="openRecurring" title="Recurring items">' + icoRepeat() + 'Recurring</button>' +
-          '<button class="pill" data-act="openImport" title="Import a spreadsheet">' + icoUpload() + 'Import .xlsx</button>' +
+          '<button class="pill hide-mobile" data-act="openRecurring" title="Recurring items">' + icoRepeat() + 'Recurring</button>' +
+          '<button class="pill hide-mobile" data-act="openImport" title="Import a spreadsheet">' + icoUpload() + 'Import .xlsx</button>' +
           '<button class="pill" data-act="openSettings">' + icoRate() + 'Rates</button>' +
         '</div>' +
       '</header>';
