@@ -1652,10 +1652,11 @@
     el.className = 'scan-status' + (cls ? ' ' + cls : '');
     el.innerHTML = html;
   }
-  function extractFail(reason) {
+  function extractFail(reason, tried) {
     var base = 'Couldn’t read it automatically — enter the total below.';
-    var msg = reason ? base + ' <span class="scan-reason">(' + esc(String(reason).slice(0, 80)) + ')</span>' : base;
-    setScanStatus(msg, 'warn');
+    var extra = reason ? ' <span class="scan-reason">(' + esc(String(reason).slice(0, 120)) + ')</span>' : '';
+    if (tried && tried.length) extra += ' <span class="scan-reason">[tried: ' + esc(tried.join(', ')) + ']</span>';
+    setScanStatus(base + extra, 'warn');
     var a = document.getElementById('scan-amount'); if (a) try { a.focus(); } catch (e) {}
   }
   function runExtraction(imgDataUrl) {
@@ -1671,7 +1672,7 @@
         if (status < 200 || status >= 300 || (res && res.error)) {
           var reason = (res && (res.error || res.detail)) ||
             (status === 404 ? 'function not deployed (404)' : status ? 'HTTP ' + status : 'no response');
-          extractFail(reason);
+          extractFail(reason, res && res.tried);
           return;
         }
         var filled = [];

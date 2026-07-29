@@ -21,12 +21,25 @@ const https = require('https');
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
 
-// Preference order when the key supports several. Anything with "flash" is fine
-// (fast + cheap + vision); we just prefer newer, lighter ones first.
-const PREFERRED = [
-  'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.0-flash-lite',
-  'gemini-2.5-flash-lite', 'gemini-1.5-flash', 'gemini-flash-latest'
-];
+// Fallback list, only used if model discovery fails outright. "*-latest"
+// aliases are safest because Google keeps them pointed at a current model.
+const FALLBACK = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+
+// Rank a discovered model name: prefer a current, non-lite Flash model that
+// can do vision. Retired/experimental/non-text models score low or negative.
+function scoreModel(n) {
+  var s = 0;
+  if (/flash/i.test(n)) s += 100;          // flash = fast, cheap, multimodal
+  if (/latest/i.test(n)) s += 45;          // aliases never go stale
+  if (/-2\.5/.test(n)) s += 30;
+  else if (/-2\.0/.test(n)) s += 25;
+  else if (/-1\.5/.test(n)) s += 3;        // 1.5 is being retired
+  if (/lite/i.test(n)) s -= 12;
+  if (/preview|exp|experimental|thinking/i.test(n)) s -= 40;
+  if (/vision|tts|audio|image|imagen|embedding|aqa|learnlm|gemma/i.test(n)) s -= 500;
+  if (/\d{3,}/.test(n)) s -= 8;            // dated snapshots (e.g. -001, -0514)
+  return s;
+}
 
 const PROMPT = [
   'You are a receipt/payment-slip parser. Read the image and return the final',
@@ -85,13 +98,10 @@ async function discoverModels(key) {
   try { data = JSON.parse(res.text); } catch (e) {}
   var all = (data.models || [])
     .filter(function (m) { return (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0; })
-    .map(function (m) { return String(m.name || '').replace(/^models\//, ''); });
-  var pref = PREFERRED.filter(function (p) { return all.indexOf(p) >= 0; });
-  var otherFlash = all.filter(function (n) { return /flash/i.test(n) && pref.indexOf(n) < 0 && !/vision/i.test(n); });
-  var ordered = pref.concat(otherFlash).concat(all);
-  var seen = {}, dedup = [];
-  ordered.forEach(function (n) { if (n && !seen[n]) { seen[n] = 1; dedup.push(n); } });
-  return { models: dedup.slice(0, 4), error: null };
+    .map(function (m) { return String(m.name || '').replace(/^models\//, ''); })
+    .filter(function (n) { return n && scoreModel(n) > 0; }); // drop non-text / negative-scored
+  all.sort(function (a, b) { return scoreModel(b) - scoreModel(a); });
+  return { models: all.slice(0, 6), error: null };
 }
 
 exports.handler = async function (event) {
@@ -115,11 +125,7 @@ exports.handler = async function (event) {
   // Figure out which models this key can actually use. If discovery fails, fall
   // back to the preference list so we still try something.
   const disc = await discoverModels(key);
-  const models = disc.models.length ? disc.models : PREFERRED.slice(0, 3);
-  if (!disc.models.length && disc.error) {
-    // Discovery itself failed (e.g. API not enabled / bad key) — report it, but
-    // still attempt the fallback models below.
-  }
+  const models = disc.models.length ? disc.models : FALLBACK;
 
   let last = null;
   const tried = [];
